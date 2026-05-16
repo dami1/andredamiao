@@ -440,6 +440,7 @@ canvas, img, svg, rect {
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/p5@1.9.0/lib/p5.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/p5.glitch@latest/p5.glitch.js"></script>
 
 <script>
 // ── LOAD IMAGES FROM JSON ────────────────────────────────
@@ -493,7 +494,119 @@ canvas, img, svg, rect {
 
     // Init carousel scroll after slides are built
     initCarousel(imgs.length);
+
+    // Init p5.glitch on each original slide (not duplicates)
+    // Wait one frame so DOM is painted and img.src is accessible
+    requestAnimationFrame(function() {
+      initGlitchSlides(imgs);
+    });
   }
+
+  // ── p5.glitch per slide ─────────────────────────────────
+  window.initGlitchSlides = function(imgs) {
+    imgs.forEach(function(img, idx) {
+      var slide = document.getElementById('csi' + idx);
+      if (!slide) return;
+
+      new p5(function(sk) {
+        var glitch;
+        var loaded    = false;
+        var hovering  = false;
+        var intensity = 0;
+        var mouseXN   = 0.5;
+        var mouseYN   = 0.5;
+
+        sk.setup = function() {
+          var W = slide.offsetWidth  || 460;
+          var H = slide.offsetHeight || 400;
+          var cnv = sk.createCanvas(W, H);
+          cnv.style('position', 'absolute');
+          cnv.style('inset', '0');
+          cnv.style('z-index', '2');
+          cnv.parent(slide);
+          sk.pixelDensity(1);
+          sk.frameRate(20);
+          sk.noLoop();
+
+          // Hide fallback img
+          var fb = slide.querySelector('.fallback');
+          if (fb) fb.style.zIndex = '0';
+
+          glitch = new Glitch(sk);
+          glitch.errors(false);
+          glitch.loadType('jpg');
+          glitch.loadQuality(0.3);
+
+          // Load via p5.loadImage callback — correct API pattern
+          sk.loadImage('imagens/' + img.arquivo, function(p5img) {
+            glitch.loadImage(p5img);
+            loaded = true;
+            sk.loop();
+          }, function(err) {
+            console.warn('glitch: could not load', img.arquivo, err);
+          });
+
+          // Pointer events — hover + touch
+          slide.style.touchAction = 'none';
+          slide.addEventListener('pointerenter', function() {
+            hovering = true;
+          });
+          slide.addEventListener('pointermove', function(e) {
+            hovering = true;
+            var r = slide.getBoundingClientRect();
+            mouseXN = (e.clientX - r.left) / r.width;
+            mouseYN = (e.clientY - r.top)  / r.height;
+          });
+          slide.addEventListener('pointerdown', function(e) {
+            slide.setPointerCapture(e.pointerId);
+            hovering = true;
+            var r = slide.getBoundingClientRect();
+            mouseXN = (e.clientX - r.left) / r.width;
+            mouseYN = (e.clientY - r.top)  / r.height;
+          });
+          slide.addEventListener('pointerup', function(e) {
+            if (e.pointerType === 'touch') hovering = false;
+          });
+          slide.addEventListener('pointerleave', function() {
+            hovering = false;
+          });
+          slide.addEventListener('pointercancel', function() {
+            hovering = false;
+          });
+        };
+
+        sk.draw = function() {
+          if (!loaded) return;
+
+          // Slow spring
+          var target = hovering ? 1 : 0;
+          intensity += (target - intensity) * 0.015;
+
+          glitch.resetBytes();
+
+          if (intensity > 0.01) {
+            // Limit corruption to band near mouse Y
+            var bs = Math.max(0, mouseYN - (0.02 + intensity * 0.06));
+            var be = Math.min(1, mouseYN + (0.02 + intensity * 0.06));
+            glitch.limitBytes(bs, be);
+            var n = Math.floor(intensity * (3 + mouseXN * 15));
+            if (n > 0) glitch.randomBytes(n);
+            if (intensity > 0.6) {
+              glitch.replaceHex('ffdb00430001', 'ffdb004300ff');
+            }
+          }
+
+          glitch.buildImage(function(img) {
+            if (!img) return;
+            sk.clear();
+            sk.tint(255);
+            sk.image(img, 0, 0, sk.width, sk.height);
+            sk.filter(sk.GRAY);
+          });
+        };
+      });
+    });
+  };
 
   window.initCarousel = function(N) {
     var outer = document.getElementById('csOuter');
@@ -607,15 +720,17 @@ new p5(function(sk) {
       case 0: return amp * Math.sin(a);
       case 1: return amp * Math.max(-1, Math.min(1, Math.sin(a) * 3.5));
       case 2: return amp * (2 * (x % 1) - 1);
-      case 3:
+      case 3: {
         if (!noise) return 0;
         const pos = ((x + 1) % 1) * (noise.length - 1);
         const i0  = Math.floor(pos) % noise.length;
         const i1  = (i0 + 1) % noise.length;
         return amp * (noise[i0] * (1-(pos%1)) + noise[i1] * (pos%1));
-      case 4:
+      }
+      case 4: {
         const p = ((x%1)+1)%1;
         return amp * (p < 0.08 ? 1 : p < 0.16 ? -0.3 : 0);
+      }
     }
     return 0;
   }
@@ -752,15 +867,17 @@ function makeSono(id, specs) {
       case 0: return amp * Math.sin(a);
       case 1: return amp * Math.max(-1, Math.min(1, Math.sin(a) * 3.5));
       case 2: return amp * (2 * (x % 1) - 1);
-      case 3:
+      case 3: {
         if (!noise) return 0;
         const pos = ((x + 1) % 1) * (noise.length - 1);
         const i0  = Math.floor(pos) % noise.length;
         const i1  = (i0 + 1) % noise.length;
         return amp * (noise[i0] * (1-(pos%1)) + noise[i1] * (pos%1));
-      case 4:
+      }
+      case 4: {
         const p = ((x%1)+1)%1;
         return amp * (p < 0.08 ? 1 : p < 0.16 ? -0.3 : 0);
+      }
     }
     return 0;
   }
