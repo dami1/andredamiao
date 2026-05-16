@@ -1,0 +1,920 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>André Damião</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@200;300;700;900&family=Barlow:ital,wght@0,300;0,400;1,300&display=swap');
+
+*{margin:0;padding:0;box-sizing:border-box;}
+:root{
+  --bg:#0a0a0a;--fg:#f0ede6;--dim:#555;--lt:#2a2a2a;
+}
+body{
+  background:var(--bg);color:var(--fg);
+  font-family:'Barlow',Arial,sans-serif;
+  font-weight:300;font-size:14px;line-height:1.7;
+  overflow-x:hidden;
+}
+a{color:var(--fg);text-decoration:none;}
+a:hover{text-decoration:underline;text-underline-offset:3px;}
+a:visited{color:var(--fg);}
+
+.page{
+  position:relative;z-index:1;
+  max-width:900px;margin:0 auto;
+  padding:0 36px 120px;
+}
+
+/* HEADER */
+.site-header{
+  border-bottom:2px solid var(--fg);
+  padding:44px 0 20px;
+  position:relative;
+}
+/* p5 canvas for title glitch sits behind text */
+#title-canvas{
+  position:absolute;
+  top:44px;left:0;
+  pointer-events:none;
+  z-index:0;
+  opacity:1;
+}
+.site-name{
+  font-family:'Barlow Condensed',Arial Narrow,sans-serif;
+  font-weight:200;
+  font-size:clamp(52px,8vw,92px);
+  line-height:1;letter-spacing:-0.02em;
+  text-transform:uppercase;white-space:nowrap;
+  position:relative;z-index:1;user-select:none;
+  /* transparent so canvas shows through, with mix-blend for legibility */
+  color:var(--fg);
+  mix-blend-mode:difference;
+}
+.site-meta{
+  margin-top:10px;font-size:11px;
+  letter-spacing:0.2em;text-transform:uppercase;color:var(--dim);
+  position:relative;z-index:1;
+}
+
+/* NAV */
+.nav{
+  padding:11px 0;border-bottom:1px solid var(--lt);
+  font-size:12.5px;letter-spacing:0.04em;
+  display:flex;align-items:center;flex-wrap:wrap;gap:0;
+}
+.nav a{margin-right:22px;color:var(--fg);}
+.nav-spacer{flex:1;}
+.nav .lang-btn{
+  font-family:'Barlow Condensed',Arial Narrow,sans-serif;
+  font-weight:700;font-size:10px;
+  letter-spacing:0.22em;text-transform:uppercase;
+  color:var(--dim);background:none;border:none;padding:0;
+  transition:color 0.15s;
+}
+.nav .lang-btn.active{color:var(--fg);}
+.nav .lang-btn:hover{color:var(--fg);}
+.nav .lang-sep{font-size:10px;color:var(--lt);margin:0 4px;}
+
+/* SONOGRAM DIVIDERS */
+.sono-wrap{width:100%;position:relative;display:block;}
+.sono-wrap canvas{display:block;width:100%!important;height:100%!important;}
+
+/* CAROUSEL */
+.cs-outer{
+  width:100%;overflow:hidden;
+  position:relative;height:360px;
+  border-top:2px solid var(--fg);
+  border-bottom:2px solid var(--fg);
+  background:#000;cursor:grab;
+}
+.cs-outer:active{cursor:grabbing;}
+.cs-track{display:flex;height:100%;gap:2px;will-change:transform;user-select:none;}
+.cs-item{flex:0 0 460px;height:100%;position:relative;overflow:hidden;}
+
+/* p5 renders INTO this canvas replacing the img */
+.cs-item canvas{
+  position:absolute;inset:0;
+  width:100%!important;height:100%!important;
+  display:block;
+}
+/* fallback img hidden once canvas is ready */
+.cs-item img.fallback{
+  position:absolute;inset:0;
+  width:100%;height:100%;
+  object-fit:cover;
+  display:block;
+  filter:grayscale(100%);
+  z-index:0;
+}
+
+.cs-cap{
+  position:absolute;bottom:0;left:0;right:0;
+  background:rgba(0,0,0,0.85);color:var(--fg);
+  padding:5px 10px;font-size:10px;
+  letter-spacing:0.1em;text-transform:uppercase;
+  opacity:0;transition:opacity 0.2s;z-index:4;
+}
+.cs-item:hover .cs-cap{opacity:1;}
+.cs-ctrl{display:flex;gap:4px;margin-top:6px;justify-content:flex-end;}
+.cs-btn{
+  background:none;border:none;cursor:pointer;
+  font-size:18px;color:var(--fg);
+  padding:2px 8px;line-height:1;
+  transition:opacity 0.15s;
+  font-family:'Barlow Condensed',sans-serif;font-weight:700;
+}
+.cs-btn:hover{opacity:0.4;}
+
+/* MAIN LAYOUT */
+.main-layout{
+  display:grid;grid-template-columns:220px 1fr;gap:0 40px;
+}
+.s-label{
+  font-family:'Barlow Condensed',Arial Narrow,sans-serif;
+  font-weight:700;font-size:9.5px;
+  letter-spacing:0.26em;text-transform:uppercase;
+  color:var(--dim);margin:32px 0 10px;
+  border-top:1px solid var(--lt);padding-top:9px;display:block;
+}
+.sidebar{border-right:1px solid var(--lt);padding-right:24px;}
+.slist{list-style:none;display:flex;flex-direction:column;}
+.slist li{border-bottom:1px solid #1a1a1a;}
+.slist li:last-child{border-bottom:none;}
+.slist a{
+  display:flex;align-items:baseline;gap:6px;
+  padding:4px 0;font-size:12px;font-weight:300;line-height:1.4;
+}
+.slist a:hover .slist-title{text-decoration:underline;text-underline-offset:2px;}
+.slist-arrow{font-size:10px;color:var(--dim);flex-shrink:0;}
+.slist-title{flex:1;font-size:12px;color:var(--fg);}
+.slist-year{font-size:10px;color:var(--lt);white-space:nowrap;margin-left:auto;}
+
+/* RIGHT COL — p5.glitch image */
+.right-col{
+  padding-top:32px;
+  position:relative;
+}
+#right-img-wrap{
+  width:100%;
+  position:relative;
+  overflow:hidden;
+}
+#right-img-wrap canvas{
+  display:block;width:100%!important;
+}
+
+footer{
+  margin-top:60px;border-top:2px solid var(--fg);
+  padding-top:14px;font-size:11.5px;color:var(--dim);
+  display:flex;justify-content:space-between;flex-wrap:wrap;gap:10px;
+}
+footer a{color:var(--dim);}
+footer a:hover{color:var(--fg);}
+
+/* CUSTOM WHITE CROSS CURSOR */
+#cursor{{
+  position:fixed;
+  pointer-events:none;
+  z-index:99999;
+  transform:translate(-50%,-50%);
+  width:20px;height:20px;
+}}
+#cursor::before{{
+  content:'';
+  position:absolute;
+  left:50%;top:0;
+  width:1px;height:100%;
+  background:#f0ede6;
+  transform:translateX(-50%);
+}}
+#cursor::after{{
+  content:'';
+  position:absolute;
+  top:50%;left:0;
+  height:1px;width:100%;
+  background:#f0ede6;
+  transform:translateY(-50%);
+}}
+
+/* WHITE CROSS CURSOR */
+#xcursor{
+  position:fixed;
+  pointer-events:none;
+  z-index:99999;
+  width:24px;height:24px;
+  transform:translate(-50%,-50%);
+  top:0;left:0;
+}
+#xcursor::before{
+  content:'';
+  position:absolute;
+  left:50%;top:0;
+  width:1.5px;height:100%;
+  background:#f0ede6;
+  transform:translateX(-50%);
+}
+#xcursor::after{
+  content:'';
+  position:absolute;
+  top:50%;left:0;
+  height:1.5px;width:100%;
+  background:#f0ede6;
+  transform:translateY(-50%);
+}
+
+/* FORCE cursor:none EVERYWHERE */
+*, *::before, *::after,
+html, body, a, button, input, select, textarea,
+div, span, p, h1, h2, h3, nav, header, footer,
+canvas, img, svg, rect {
+  cursor: none !important;
+}
+
+
+/* ── LANG SWITCH ── */
+.lang-switch {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 0 2px;
+  justify-content: flex-end;
+}
+.lang-btn {
+  background: none;
+  border: none;
+  font-family: 'Barlow Condensed', Arial Narrow, sans-serif;
+  font-weight: 700;
+  font-size: 10px;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--dim);
+  padding: 0;
+  transition: color 0.15s;
+}
+.lang-btn.active { color: var(--fg); }
+.lang-btn:hover  { color: var(--fg); }
+.lang-sep { font-size: 10px; color: var(--lt); }
+
+</style>
+</head>
+<body>
+<div id="cursor"></div>
+<div id="xcursor"></div>
+<div class="page">
+
+<header class="site-header" id="siteHeader">
+  <!-- p5 glitch canvas for title — injected by JS -->
+  <div class="site-name" id="sname">ANDRÉ DAMIÃO</div>
+  <div class="site-meta" id="site-meta" data-pt="Composição &nbsp;/&nbsp; Código &nbsp;/&nbsp; Pesquisa" data-en="Composition &nbsp;/&nbsp; Code &nbsp;/&nbsp; Research">Composição &nbsp;/&nbsp; Código &nbsp;/&nbsp; Pesquisa</div>
+</header>
+
+<nav class="nav">
+  <a href="/bio/"          data-pt="Bio"          data-en="Bio">Bio</a>
+  <a href="/trabalhos/"    data-pt="Trabalhos"     data-en="Works">Trabalhos</a>
+  <a href="/performances/" data-pt="Performances"  data-en="Performances">Performances</a>
+  <a href="/textos/"       data-pt="Texto"         data-en="Text">Texto</a>
+  <a href="/contato/"      data-pt="Contato"       data-en="Contact">Contato</a>
+  <span class="nav-spacer"></span>
+  <button class="lang-btn active" id="btn-pt" onclick="setLang('pt')">PT</button>
+  <span class="lang-sep">/</span>
+  <button class="lang-btn" id="btn-en" onclick="setLang('en')">EN</button>
+</nav>
+
+<!-- SONOGRAM 1 -->
+<div class="sono-wrap" id="sono1" style="height:50px;margin-top:28px;"></div>
+
+<!-- CAROUSEL — each slide gets a p5 sketch -->
+<div class="cs-outer" id="csOuter">
+  <div class="cs-track" id="csTrack">
+    <div class="cs-item" id="csi0">
+      <img class="fallback" src="images/imagemweb2.jpg" alt="Performance — Spielhalle, Frankfurt">
+      <div class="cs-cap">Performance — Spielhalle, Frankfurt</div>
+    </div>
+    <div class="cs-item" id="csi1">
+      <img class="fallback" src="images/narva2_perf.jpg" alt="Narva — Performance">
+      <div class="cs-cap">Narva — Performance</div>
+    </div>
+    <div class="cs-item" id="csi2">
+      <img class="fallback" src="images/NarvaparaImpressao.jpg" alt="Narva">
+      <div class="cs-cap">Narva</div>
+    </div>
+    <div class="cs-item" id="csi3">
+      <img class="fallback" src="images/_DTS4699mam-foto-WEB.JPG" alt="Performance">
+      <div class="cs-cap">Performance</div>
+    </div>
+    <div class="cs-item" id="csi4">
+      <img class="fallback" src="images/cloro1.jpg" alt="Cloroquina Popups">
+      <div class="cs-cap">Cloroquina Popups</div>
+    </div>
+    <div class="cs-item" id="csi5">
+      <img class="fallback" src="images/contraquem3.jpg" alt="Contra Quem">
+      <div class="cs-cap">Contra Quem</div>
+    </div>
+    <!-- duplicates for infinite loop -->
+    <div class="cs-item"><img class="fallback" src="images/imagemweb2.jpg" alt="Performance — Spielhalle, Frankfurt"><div class="cs-cap">Performance — Spielhalle, Frankfurt</div></div>
+    <div class="cs-item"><img class="fallback" src="images/narva2_perf.jpg" alt="Narva — Performance"><div class="cs-cap">Narva — Performance</div></div>
+    <div class="cs-item"><img class="fallback" src="images/NarvaparaImpressao.jpg" alt="Narva"><div class="cs-cap">Narva</div></div>
+    <div class="cs-item"><img class="fallback" src="images/_DTS4699mam-foto-WEB.JPG" alt="Performance"><div class="cs-cap">Performance</div></div>
+    <div class="cs-item"><img class="fallback" src="images/cloro1.jpg" alt="Cloroquina Popups"><div class="cs-cap">Cloroquina Popups</div></div>
+    <div class="cs-item"><img class="fallback" src="images/contraquem3.jpg" alt="Contra Quem"><div class="cs-cap">Contra Quem</div></div>
+  </div>
+</div>
+<div class="cs-ctrl">
+  <button class="cs-btn" id="csPrev">&#8592;</button>
+  <button class="cs-btn" id="csNext">&#8594;</button>
+</div>
+
+<!-- SONOGRAM 2 -->
+<div class="sono-wrap" id="sono2" style="height:38px;margin-top:36px;"></div>
+
+<!-- MAIN LAYOUT -->
+<div class="main-layout">
+  <aside class="sidebar">
+    <span class="s-label" data-pt="Obras &amp; Projetos" data-en="Works &amp; Projects">Obras &amp; Projetos</span>
+    <ul class="slist">
+      <li><a href="#"><span class="slist-arrow">→</span><span class="slist-title">[Título da Obra]</span><span class="slist-year">2025</span></a></li>
+      <li><a href="#"><span class="slist-arrow">→</span><span class="slist-title">[Título da Série]</span><span class="slist-year">2024</span></a></li>
+      <li><a href="#"><span class="slist-arrow">→</span><span class="slist-title">[Título do Álbum]</span><span class="slist-year">2024</span></a></li>
+      <li><a href="#"><span class="slist-arrow">→</span><span class="slist-title">[Título da Instalação]</span><span class="slist-year">2023</span></a></li>
+      <li><a href="#"><span class="slist-arrow">→</span><span class="slist-title">[Título da Peça]</span><span class="slist-year">2023</span></a></li>
+      <li><a href="#"><span class="slist-arrow">→</span><span class="slist-title">[Colaboração]</span><span class="slist-year">2022</span></a></li>
+      <li><a href="#"><span class="slist-arrow">→</span><span class="slist-title">[Título]</span><span class="slist-year">2021</span></a></li>
+      <li><a href="#"><span class="slist-arrow">→</span><span class="slist-title">[Título]</span><span class="slist-year">2020</span></a></li>
+    </ul>
+    <div class="sono-wrap" id="sono3" style="height:30px;margin-top:24px;"></div>
+    <span class="s-label" style="margin-top:8px;" data-pt="Textos &amp; Press" data-en="Texts &amp; Press">Textos &amp; Press</span>
+    <ul class="slist">
+      <li><a href="#"><span class="slist-arrow">→</span><span class="slist-title">[Título do Texto]</span><span class="slist-year">2025</span></a></li>
+      <li><a href="#"><span class="slist-arrow">→</span><span class="slist-title">Entrevista — [Publicação]</span><span class="slist-year">2024</span></a></li>
+      <li><a href="#"><span class="slist-arrow">→</span><span class="slist-title">[Título do Artigo]</span><span class="slist-year">2023</span></a></li>
+    </ul>
+  </aside>
+
+  <div class="right-col"></div>
+</div>
+
+<!-- SONOGRAM 4 -->
+<div class="sono-wrap" id="sono4" style="height:46px;margin-top:48px;"></div>
+
+<footer>
+  <div id="footer-copy" data-pt="André Damião · copyleft 2025–amanhã depois do depois de amanhã" data-en="André Damião · copyleft 2025–the day after tomorrow">André Damião · copyleft 2025–amanhã depois do depois de amanhã</div>
+  <div>
+    <a href="https://andredamiao.bandcamp.com/" target="_blank" rel="noopener">Bandcamp</a> –
+    <a href="https://www.instagram.com/_andre_damiao_/" target="_blank" rel="noopener">Instagram</a> –
+    <a href="https://www.youtube.com/@andre_damiao" target="_blank" rel="noopener">Youtube</a>
+  </div>
+</footer>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/p5@1.9.0/lib/p5.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/p5.glitch@latest/p5.glitch.js"></script>
+
+<script>
+const IMG_DATA = [
+  "images/imagemweb2.jpg",
+  "images/narva2_perf.jpg",
+  "images/NarvaparaImpressao.jpg",
+  "images/_DTS4699mam-foto-WEB.JPG",
+  "images/cloro1.jpg",
+  "images/contraquem3.jpg"
+];
+
+// ═══════════════════════════════════════════════════════════
+// 1. TITLE GLITCH — p5.glitch renders text as image, glitches
+// ═══════════════════════════════════════════════════════════
+new p5(function(sk) {
+  let W, H, fn = 0;
+  let mouseOver = false;
+  let mouseXLocal = 0;
+  let particles = [], textReady = false;
+
+  function waveVal(type, t, scroll, freq, phase, amp, noise) {
+    const x = (t * freq + scroll) % 1;
+    const a = x * Math.PI * 2 + phase;
+    switch(type) {
+      case 0: return amp * Math.sin(a);
+      case 1: return amp * Math.max(-1, Math.min(1, Math.sin(a) * 3.5));
+      case 2: return amp * (2 * (x % 1) - 1);
+      case 3:
+        if (!noise) return 0;
+        const pos = ((x + 1) % 1) * (noise.length - 1);
+        const i0  = Math.floor(pos) % noise.length;
+        const i1  = (i0 + 1) % noise.length;
+        return amp * (noise[i0] * (1-(pos%1)) + noise[i1] * (pos%1));
+      case 4:
+        const p = ((x%1)+1)%1;
+        return amp * (p < 0.08 ? 1 : p < 0.16 ? -0.3 : 0);
+    }
+    return 0;
+  }
+
+  function makeNoise(npts) {
+    const freqs  = [1.3, 2.7, 5.1, 8.9];
+    const phases = freqs.map(() => Math.random() * Math.PI * 2);
+    const amps   = [0.45, 0.28, 0.17, 0.10];
+    const arr = [];
+    for (let k = 0; k <= npts; k++) {
+      const t = k / npts;
+      let v = 0;
+      freqs.forEach((f, i) => { v += amps[i] * Math.sin(t * Math.PI * 2 * f + phases[i]); });
+      arr.push(v);
+    }
+    return arr;
+  }
+
+  sk.setup = function() {
+    const header = document.getElementById('siteHeader');
+    const nameEl = document.getElementById('sname');
+    W = header.offsetWidth || 800;
+    const fs = Math.min(130, Math.max(72, W * 0.115));
+    H = Math.round(fs * 1.15);
+
+    const cnv = sk.createCanvas(W, H);
+    cnv.elt.id = 'title-canvas';
+    cnv.elt.style.cssText = 'position:absolute;top:32px;left:0;pointer-events:none;z-index:3;';
+    header.insertBefore(cnv.elt, header.firstChild);
+    nameEl.style.visibility = 'hidden';
+
+    sk.pixelDensity(1);
+    sk.frameRate(30);
+    sk.noLoop();
+
+    const pg = sk.createGraphics(W, H);
+    pg.background(0,0,0,0);
+    pg.fill(255); pg.noStroke();
+    pg.textFont('Arial Narrow, Arial');
+    pg.textStyle(pg.NORMAL);
+    pg.textSize(fs);
+    pg.text('ANDRÉ DAMIÃO', 0, fs * 0.88);
+    pg.loadPixels();
+
+    const pix = pg.pixels, PW = pg.width, PH = pg.height;
+    const GRID = 3;
+    const rows = {};
+    for (let y = 0; y < PH; y += GRID) {
+      for (let x = 0; x < PW; x += GRID) {
+        const i = (y * PW + x) * 4;
+        if (pix[i+3] > 60) {
+          const ry = Math.floor(y/GRID);
+          if (!rows[ry]) rows[ry] = { y, pts: [] };
+          rows[ry].pts.push({ ox: x, oy: y });
+        }
+      }
+    }
+    pg.remove();
+
+    let si = 0;
+    Object.values(rows).forEach(function(row) {
+      if (row.pts.length < 2) return;
+      const type  = si % 5;
+      const xMin  = row.pts[0].ox;
+      const xMax  = row.pts[row.pts.length-1].ox;
+      const span  = xMax - xMin || 1;
+      const freq  = 0.6 + (span/W) * 3.5;
+      particles.push({
+        y: row.y, xMin, xMax, span, type, freq,
+        phase:  Math.random() * Math.PI * 2,
+        scroll: Math.random(),
+        speed:  0.0003 + Math.random() * 0.0005, // slower scroll
+        noise:  (type===3) ? makeNoise(120) : null,
+        // per-dot amp for localised effect
+        dots: row.pts.map(p => ({
+          ox: p.ox, oy: p.oy,
+          t: (p.ox - xMin) / span,
+          amp: 0, ampTarget: 0
+        }))
+      });
+      si++;
+    });
+
+    textReady = true;
+    sk.loop();
+
+    // track mouse X over the header
+    header.addEventListener('mouseenter', function() { mouseOver = true; });
+    header.addEventListener('mouseleave', function() {
+      mouseOver = false;
+      // decay all dots
+      particles.forEach(s => s.dots.forEach(d => { d.ampTarget = 0; }));
+    });
+    header.addEventListener('mousemove', function(e) {
+      const rect = header.getBoundingClientRect();
+      mouseXLocal = e.clientX - rect.left;
+    });
+  };
+
+  sk.draw = function() {
+    if (!textReady) return;
+    fn++;
+    sk.clear();
+    sk.noStroke();
+
+    // Influence radius: dots within ~120px of mouse get full amp
+    const RADIUS = 120;
+    const MAX_AMP = 14;
+
+    for (const strand of particles) {
+      strand.scroll = (strand.scroll + strand.speed) % 1;
+
+      // Update per-dot ampTarget based on distance to mouse X
+      strand.dots.forEach(function(dot) {
+        if (mouseOver) {
+          const dist = Math.abs(dot.ox - mouseXLocal);
+          const inf  = Math.max(0, 1 - dist / RADIUS);
+          dot.ampTarget = inf * MAX_AMP;
+        } else {
+          dot.ampTarget = 0;
+        }
+        // slow spring — 0.015 instead of 0.032
+        dot.amp += (dot.ampTarget - dot.amp) * 0.015;
+      });
+
+      sk.fill(240, 237, 230);
+      for (const dot of strand.dots) {
+        if (dot.amp < 0.05) {
+          sk.rect(dot.ox, dot.oy, 2, 2);
+        } else {
+          const dy = waveVal(strand.type, dot.t, strand.scroll, strand.freq, strand.phase, dot.amp, strand.noise);
+          sk.rect(dot.ox, dot.oy - dy, 2, 2);
+        }
+      }
+    }
+  };
+
+  sk.windowResized = function() {
+    const header = document.getElementById('siteHeader');
+    if (!header) return;
+    W = header.offsetWidth;
+    sk.resizeCanvas(W, H);
+  };
+});
+
+function makeSono(id, specs) {
+  new p5(function(sk) {
+    let W, H, fn = 0;
+    let mouseOver = false, mouseXL = 0, mouseYL = 0;
+    let strands = [];
+
+  function waveVal(type, t, scroll, freq, phase, amp, noise) {
+    const x = (t * freq + scroll) % 1;
+    const a = x * Math.PI * 2 + phase;
+    switch(type) {
+      case 0: return amp * Math.sin(a);
+      case 1: return amp * Math.max(-1, Math.min(1, Math.sin(a) * 3.5));
+      case 2: return amp * (2 * (x % 1) - 1);
+      case 3:
+        if (!noise) return 0;
+        const pos = ((x + 1) % 1) * (noise.length - 1);
+        const i0  = Math.floor(pos) % noise.length;
+        const i1  = (i0 + 1) % noise.length;
+        return amp * (noise[i0] * (1-(pos%1)) + noise[i1] * (pos%1));
+      case 4:
+        const p = ((x%1)+1)%1;
+        return amp * (p < 0.08 ? 1 : p < 0.16 ? -0.3 : 0);
+    }
+    return 0;
+  }
+
+  function makeNoise(npts) {
+    const freqs  = [1.3, 2.7, 5.1, 8.9];
+    const phases = freqs.map(() => Math.random() * Math.PI * 2);
+    const amps   = [0.45, 0.28, 0.17, 0.10];
+    const arr = [];
+    for (let k = 0; k <= npts; k++) {
+      const t = k / npts;
+      let v = 0;
+      freqs.forEach((f, i) => { v += amps[i] * Math.sin(t * Math.PI * 2 * f + phases[i]); });
+      arr.push(v);
+    }
+    return arr;
+  }
+
+    sk.setup = function() {
+      const wrap = document.getElementById(id);
+      if (!wrap) return;
+      W = wrap.offsetWidth || 828;
+      H = wrap.offsetHeight || 50;
+      const cnv = sk.createCanvas(W, H);
+      cnv.parent(id);
+      sk.pixelDensity(1);
+      sk.frameRate(30);
+
+      const DOT = 2, GAP = 1, STEP = DOT + GAP;
+
+      strands = specs.map(function(s, i) {
+        const x0px = Math.round(s.x0 * W);
+        const x1px = Math.round(s.x1 * W);
+        const yPx  = Math.round(s.y  * H);
+        const hPx  = Math.max(DOT, Math.round(s.h * H));
+        const type  = i % 5;
+        const span  = x1px - x0px || 1;
+        const len   = s.x1 - s.x0;
+        const base  = 0.35 + (1-len)*1.4 + (1-s.h)*0.5;
+        const freq  = 0.7 + len * 3.0;
+        const noise = (type===3) ? makeNoise(120) : null;
+
+        const dots = [];
+        for (let x = x0px; x <= x1px - DOT; x += STEP) {
+          dots.push({ ox: x, oy: yPx, t: (x-x0px)/span, amp: 0, ampTarget: 0 });
+          if (hPx >= DOT*2+GAP)
+            dots.push({ ox: x, oy: yPx+DOT+GAP, t: (x-x0px)/span, amp: 0, ampTarget: 0 });
+        }
+
+        return {
+          x0: x0px, x1: x1px, y: yPx, span, type, freq,
+          phase:  Math.random() * Math.PI * 2,
+          scroll: Math.random(),
+          speed:  base * (0.6 + Math.random()*0.8) * 0.003, // slower
+          noise, a: s.a || 255, dots
+        };
+      });
+
+      cnv.elt.addEventListener('mouseenter', function() { mouseOver = true; });
+      cnv.elt.addEventListener('mouseleave', function() {
+        mouseOver = false;
+        strands.forEach(st => st.dots.forEach(d => { d.ampTarget = 0; }));
+      });
+      cnv.elt.addEventListener('mousemove', function(e) {
+        const rect = cnv.elt.getBoundingClientRect();
+        mouseXL = e.clientX - rect.left;
+        mouseYL = e.clientY - rect.top;
+      });
+    };
+
+    sk.draw = function() {
+      fn++;
+      sk.background(8);
+      sk.noStroke();
+
+      // Radius of influence in px — narrow, follows mouse closely
+      const RADIUS_X = W * 0.12; // ~12% of width
+      const RADIUS_Y = H * 1.2;  // generous vertically (small canvas)
+      const MAX_AMP  = 10;
+
+      for (const st of strands) {
+        st.scroll = (st.scroll + st.speed) % 1;
+
+        // per-dot amplitude driven by 2D proximity to mouse
+        const distY = Math.abs(mouseYL - (st.y + 1));
+        const infY  = mouseOver ? Math.max(0, 1 - distY / RADIUS_Y) : 0;
+
+        st.dots.forEach(function(dot) {
+          if (mouseOver && infY > 0) {
+            const distX = Math.abs(mouseXL - dot.ox);
+            const infX  = Math.max(0, 1 - distX / RADIUS_X);
+            dot.ampTarget = infX * infY * MAX_AMP;
+          } else {
+            dot.ampTarget = 0;
+          }
+          dot.amp += (dot.ampTarget - dot.amp) * 0.015;
+        });
+
+        sk.fill(240, 237, 230, st.a);
+        const DOT = 2;
+        for (const dot of st.dots) {
+          const scrollPx = st.scroll * st.span;
+          const wrappedX = st.x0 + ((dot.ox + scrollPx - st.x0) % st.span + st.span) % st.span;
+          if (dot.amp < 0.05) {
+            sk.rect(wrappedX, dot.oy, DOT, DOT);
+          } else {
+            const dy = waveVal(st.type, dot.t, st.scroll, st.freq, st.phase, dot.amp, st.noise);
+            sk.rect(wrappedX, dot.oy - dy, DOT, DOT);
+          }
+        }
+      }
+    };
+
+    sk.windowResized = function() {
+      const wrap = document.getElementById(id);
+      if (!wrap) return;
+      W = wrap.offsetWidth;
+      sk.resizeCanvas(W, H);
+    };
+  });
+}
+makeSono('sono1', [
+  {y:0.00,h:0.14,x0:0,x1:1,a:255},
+  {y:0.18,h:0.02,x0:0,x1:1,a:255},
+  {y:0.24,h:0.02,x0:0,x1:1,a:240},
+  {y:0.30,h:0.02,x0:0,x1:0.82,a:220},
+  {y:0.36,h:0.02,x0:0,x1:0.63,a:190},
+  {y:0.42,h:0.02,x0:0,x1:0.46,a:155},
+  {y:0.48,h:0.02,x0:0,x1:0.29,a:120},
+  {y:0.66,h:0.04,x0:0,x1:1,a:255},
+  {y:0.78,h:0.04,x0:0,x1:0.75,a:255},
+  {y:0.88,h:0.06,x0:0,x1:1,a:255},
+  {y:0.98,h:0.02,x0:0,x1:1,a:255},
+]);
+makeSono('sono2', [
+  {y:0.00,h:0.08,x0:0,x1:1,a:255},
+  {y:0.16,h:0.03,x0:0,x1:1,a:255},
+  {y:0.29,h:0.03,x0:0.10,x1:0.53,a:200},
+  {y:0.42,h:0.03,x0:0.24,x1:1,a:200},
+  {y:0.55,h:0.05,x0:0,x1:1,a:255},
+  {y:0.71,h:0.03,x0:0,x1:0.36,a:160},
+  {y:0.82,h:0.03,x0:0.48,x1:1,a:160},
+  {y:0.92,h:0.08,x0:0,x1:1,a:255},
+]);
+makeSono('sono3', [
+  {y:0.00,h:0.10,x0:0,x1:1,a:255},
+  {y:0.20,h:0.03,x0:0,x1:1,a:255},
+  {y:0.36,h:0.07,x0:0,x1:0.60,a:220},
+  {y:0.36,h:0.07,x0:0.68,x1:1,a:220},
+  {y:0.53,h:0.03,x0:0,x1:1,a:255},
+  {y:0.67,h:0.03,x0:0.12,x1:0.85,a:180},
+  {y:0.80,h:0.05,x0:0,x1:1,a:255},
+  {y:0.93,h:0.07,x0:0,x1:1,a:255},
+]);
+makeSono('sono4', [
+  {y:0.00,h:0.02,x0:0,x1:1,a:255},
+  {y:0.06,h:0.02,x0:0,x1:1,a:255},
+  {y:0.13,h:0.06,x0:0,x1:1,a:255},
+  {y:0.24,h:0.02,x0:0,x1:1,a:255},
+  {y:0.31,h:0.02,x0:0,x1:0.73,a:200},
+  {y:0.39,h:0.04,x0:0,x1:1,a:255},
+  {y:0.48,h:0.09,x0:0,x1:1,a:255},
+  {y:0.62,h:0.02,x0:0,x1:1,a:255},
+  {y:0.76,h:0.04,x0:0,x1:1,a:255},
+  {y:0.84,h:0.02,x0:0,x1:1,a:255},
+  {y:0.91,h:0.06,x0:0,x1:1,a:255},
+  {y:0.98,h:0.02,x0:0,x1:1,a:255},
+]);
+
+
+// ═══════════════════════════════════════════════════════════
+// 5. CAROUSEL SCROLL
+// ═══════════════════════════════════════════════════════════
+
+// ── CAROUSEL SLIDES — p5.glitch localised to mouse position ──
+(function() {
+
+  function b64toBlob(b64, mimeType) {
+    var byteStr = atob(b64);
+    var ab = new ArrayBuffer(byteStr.length);
+    var ia = new Uint8Array(ab);
+    for (var i = 0; i < byteStr.length; i++) ia[i] = byteStr.charCodeAt(i);
+    return new Blob([ab], { type: mimeType });
+  }
+
+  for (var i = 0; i < 6; i++) {
+    (function(idx) {
+      new p5(function(sk) {
+        var glitch;
+        var hovering        = false;
+        var imgLoaded       = false;
+        var blobUrl         = null;
+        var mouseXN         = 0;
+        var mouseYN         = 0;
+        var intensity       = 0;
+        var intensityTarget = 0;
+        var framesSinceLoad = 0;
+        // Reload every N frames to reset internal byte state
+        // replaceHex corrupts the stored bytes permanently over time
+        var RELOAD_INTERVAL = 120; // every ~6s at 20fps
+
+        function reload() {
+          var slide = document.getElementById('csi' + idx);
+          if (!slide) return;
+          var fb = slide.querySelector('.fallback');
+          if (!fb) return;
+          if (blobUrl) try { URL.revokeObjectURL(blobUrl); } catch(e) {}
+          var blob = b64toBlob(fb.src.replace('data:image/jpeg;base64,',''), 'image/jpeg');
+          blobUrl = URL.createObjectURL(blob);
+          imgLoaded = false;
+          glitch.loadType('jpg');
+          glitch.loadQuality(0.3);
+          glitch.loadImage(blobUrl, function() {
+            imgLoaded = true;
+            framesSinceLoad = 0;
+          });
+        }
+
+        sk.setup = function() {
+          var slide = document.getElementById('csi' + idx);
+          if (!slide) return;
+          var W = slide.offsetWidth  || 460;
+          var H = slide.offsetHeight || 400;
+          var cnv = sk.createCanvas(W, H);
+          cnv.style('position','absolute');
+          cnv.style('inset','0');
+          cnv.style('z-index','2');
+          cnv.parent('csi' + idx);
+          sk.pixelDensity(1);
+          sk.imageMode(sk.CORNER);
+          sk.frameRate(20);
+          var fb = slide.querySelector('.fallback');
+          if (fb) fb.style.zIndex = '0';
+          glitch = new Glitch(sk);
+          glitch.errors(false);
+          reload();
+          slide.addEventListener('mouseenter', function() { hovering=true;  intensityTarget=1; });
+          slide.addEventListener('mouseleave', function() { hovering=false; intensityTarget=0; });
+          slide.addEventListener('mousemove',  function(e) {
+            var r = slide.getBoundingClientRect();
+            mouseXN = (e.clientX - r.left) / r.width;
+            mouseYN = (e.clientY - r.top)  / r.height;
+          });
+          // click also triggers a reload (matches observed behaviour)
+          slide.addEventListener('click', function() { reload(); });
+        };
+
+        sk.draw = function() {
+          if (!imgLoaded) return;
+          framesSinceLoad++;
+
+          // Proactive reload before bytes degrade — always resets clean
+          if (framesSinceLoad >= RELOAD_INTERVAL) {
+            reload();
+            return;
+          }
+
+          intensity += (intensityTarget - intensity) * 0.015;
+          glitch.resetBytes();
+
+          if (intensity > 0.01) {
+            var bs = Math.max(0, mouseYN - (0.02 + intensity * 0.04));
+            var be = Math.min(1, mouseYN + (0.02 + intensity * 0.04));
+            glitch.limitBytes(bs, be);
+            var n = Math.floor(intensity * (2 + mouseXN * 18));
+            if (n > 0) glitch.randomBytes(n);
+            if (intensity > 0.5) glitch.replaceHex('ffdb00430001','ffdb004300ff');
+          }
+
+          glitch.buildImage(function(img) {
+            if (!img) { reload(); return; }
+            sk.clear();
+            sk.tint(255);
+            sk.image(img, 0, 0, sk.width, sk.height);
+            sk.filter(sk.GRAY);
+          });
+        };
+      });
+    })(i);
+  }
+})();
+
+(function() {
+  const outer = document.getElementById('csOuter');
+  const track = document.getElementById('csTrack');
+  const prev  = document.getElementById('csPrev');
+  const next  = document.getElementById('csNext');
+  const ITEM_W=462, N=6, total=ITEM_W*N;
+  let pos=0,drag=false,ds=0,ps=0,timer,auto=true;
+  const SPD=0.55;
+  function cl(){ if(pos>=total)pos-=total; if(pos<0)pos+=total; }
+  function rn(){ track.style.transform=`translateX(${-pos}px)`; }
+  function lp(){ if(auto&&!drag){ pos+=SPD; cl(); rn(); } requestAnimationFrame(lp); }
+  function sh(d){ auto=false; pos+=d*ITEM_W; cl(); rn(); clearTimeout(timer); timer=setTimeout(()=>auto=true,4000); }
+  prev.onclick=()=>sh(-1); next.onclick=()=>sh(1);
+  outer.addEventListener('mousedown',e=>{drag=true;auto=false;ds=e.clientX;ps=pos;clearTimeout(timer);});
+  window.addEventListener('mousemove',e=>{if(!drag)return;pos=ps-(e.clientX-ds);cl();rn();});
+  window.addEventListener('mouseup',()=>{if(!drag)return;drag=false;timer=setTimeout(()=>auto=true,2000);});
+  lp();
+})();
+</script>
+
+<script>
+const cur = document.getElementById('cursor');
+document.addEventListener('mousemove', e => {
+  cur.style.left = e.clientX + 'px';
+  cur.style.top  = e.clientY + 'px';
+});
+</script>
+
+<script>
+(function(){
+  const cur = document.getElementById('xcursor');
+  let mx = -100, my = -100;
+  document.addEventListener('mousemove', function(e){
+    mx = e.clientX; my = e.clientY;
+    cur.style.left = mx + 'px';
+    cur.style.top  = my + 'px';
+  });
+  document.addEventListener('mouseleave', function(){
+    cur.style.left = '-100px';
+    cur.style.top  = '-100px';
+  });
+})();
+</script>
+
+
+<script>
+// ── LANGUAGE SWITCHER ──────────────────────────────────
+function setLang(lang) {
+  document.getElementById('btn-pt').classList.toggle('active', lang === 'pt');
+  document.getElementById('btn-en').classList.toggle('active', lang === 'en');
+  document.querySelectorAll('[data-pt][data-en]').forEach(function(el) {
+    el.innerHTML = el.getAttribute('data-' + lang);
+  });
+  document.documentElement.lang = lang === 'pt' ? 'pt-BR' : 'en';
+  try { localStorage.setItem('ad-lang', lang); } catch(e) {}
+}
+// restore saved preference
+(function() {
+  try { var s = localStorage.getItem('ad-lang'); if (s === 'en') setLang('en'); } catch(e) {}
+})();
+</script>
+</body>
+</html>
