@@ -370,7 +370,7 @@ canvas, img, svg, rect {
       <div class="cs-cap">Narva</div>
     </div>
     <div class="cs-item" id="csi3">
-      <img class="fallback" src="imagens/_DTS4699mam-foto-WEB.JPG" alt="Performance">
+      <img class="fallback" src="imagens/DTS4699mam-foto-WEB.jpg" alt="Performance">
       <div class="cs-cap">Performance</div>
     </div>
     <div class="cs-item" id="csi4">
@@ -385,7 +385,7 @@ canvas, img, svg, rect {
     <div class="cs-item"><img class="fallback" src="imagens/imagemweb2.jpg" alt="Performance — Spielhalle, Frankfurt"><div class="cs-cap">Performance — Spielhalle, Frankfurt</div></div>
     <div class="cs-item"><img class="fallback" src="imagens/narva2_perf.jpg" alt="Narva — Performance"><div class="cs-cap">Narva — Performance</div></div>
     <div class="cs-item"><img class="fallback" src="imagens/NarvaparaImpressao.jpg" alt="Narva"><div class="cs-cap">Narva</div></div>
-    <div class="cs-item"><img class="fallback" src="imagens/_DTS4699mam-foto-WEB.JPG" alt="Performance"><div class="cs-cap">Performance</div></div>
+    <div class="cs-item"><img class="fallback" src="imagens/DTS4699mam-foto-WEB.jpg" alt="Performance"><div class="cs-cap">Performance</div></div>
     <div class="cs-item"><img class="fallback" src="imagens/cloro1.jpg" alt="Cloroquina Popups"><div class="cs-cap">Cloroquina Popups</div></div>
     <div class="cs-item"><img class="fallback" src="imagens/contraquem3.jpg" alt="Contra Quem"><div class="cs-cap">Contra Quem</div></div>
   </div>
@@ -445,7 +445,7 @@ const IMG_DATA = [
   "imagens/imagemweb2.jpg",
   "imagens/narva2_perf.jpg",
   "imagens/NarvaparaImpressao.jpg",
-  "imagens/_DTS4699mam-foto-WEB.JPG",
+  "imagens/DTS4699mam-foto-WEB.jpg",
   "imagens/cloro1.jpg",
   "imagens/contraquem3.jpg"
 ];
@@ -710,6 +710,22 @@ function makeSono(id, specs) {
         mouseXL = e.clientX - rect.left;
         mouseYL = e.clientY - rect.top;
       });
+      // Touch support
+      cnv.elt.addEventListener('touchstart', function(e) {
+        mouseOver = true;
+        const rect = cnv.elt.getBoundingClientRect();
+        mouseXL = e.touches[0].clientX - rect.left;
+        mouseYL = e.touches[0].clientY - rect.top;
+      }, {passive:true});
+      cnv.elt.addEventListener('touchmove', function(e) {
+        const rect = cnv.elt.getBoundingClientRect();
+        mouseXL = e.touches[0].clientX - rect.left;
+        mouseYL = e.touches[0].clientY - rect.top;
+      }, {passive:true});
+      cnv.elt.addEventListener('touchend', function() {
+        mouseOver = false;
+        strands.forEach(st => st.dots.forEach(d => { d.ampTarget = 0; }));
+      }, {passive:true});
     };
 
     sk.draw = function() {
@@ -818,45 +834,34 @@ makeSono('sono4', [
 
 // ── CAROUSEL SLIDES — p5.glitch localised to mouse position ──
 (function() {
-
-  function b64toBlob(b64, mimeType) {
-    var byteStr = atob(b64);
-    var ab = new ArrayBuffer(byteStr.length);
-    var ia = new Uint8Array(ab);
-    for (var i = 0; i < byteStr.length; i++) ia[i] = byteStr.charCodeAt(i);
-    return new Blob([ab], { type: mimeType });
-  }
-
   for (var i = 0; i < 6; i++) {
     (function(idx) {
       new p5(function(sk) {
         var glitch;
         var hovering        = false;
         var imgLoaded       = false;
-        var blobUrl         = null;
         var mouseXN         = 0;
         var mouseYN         = 0;
         var intensity       = 0;
         var intensityTarget = 0;
         var framesSinceLoad = 0;
-        // Reload every N frames to reset internal byte state
-        // replaceHex corrupts the stored bytes permanently over time
-        var RELOAD_INTERVAL = 120; // every ~6s at 20fps
+        var RELOAD_INTERVAL = 120;
 
         function reload() {
           var slide = document.getElementById('csi' + idx);
           if (!slide) return;
           var fb = slide.querySelector('.fallback');
           if (!fb) return;
-          if (blobUrl) try { URL.revokeObjectURL(blobUrl); } catch(e) {}
-          var blob = b64toBlob(fb.src.replace('data:image/jpeg;base64,',''), 'image/jpeg');
-          blobUrl = URL.createObjectURL(blob);
           imgLoaded = false;
           glitch.loadType('jpg');
           glitch.loadQuality(0.3);
-          glitch.loadImage(blobUrl, function() {
+          // Load via p5.loadImage with the file URL — no base64 conversion needed
+          sk.loadImage(fb.src, function(p5img) {
+            glitch.loadImage(p5img);
             imgLoaded = true;
             framesSinceLoad = 0;
+          }, function(err) {
+            console.warn('glitch loadImage error:', err);
           });
         }
 
@@ -875,9 +880,12 @@ makeSono('sono4', [
           sk.frameRate(20);
           var fb = slide.querySelector('.fallback');
           if (fb) fb.style.zIndex = '0';
+
           glitch = new Glitch(sk);
           glitch.errors(false);
           reload();
+
+          // Mouse events
           slide.addEventListener('mouseenter', function() { hovering=true;  intensityTarget=1; });
           slide.addEventListener('mouseleave', function() { hovering=false; intensityTarget=0; });
           slide.addEventListener('mousemove',  function(e) {
@@ -885,19 +893,31 @@ makeSono('sono4', [
             mouseXN = (e.clientX - r.left) / r.width;
             mouseYN = (e.clientY - r.top)  / r.height;
           });
-          // click also triggers a reload (matches observed behaviour)
           slide.addEventListener('click', function() { reload(); });
+
+          // Touch events
+          slide.addEventListener('touchstart', function(e) {
+            hovering = true; intensityTarget = 1;
+            var t = e.touches[0];
+            var r = slide.getBoundingClientRect();
+            mouseXN = (t.clientX - r.left) / r.width;
+            mouseYN = (t.clientY - r.top)  / r.height;
+          }, {passive: true});
+          slide.addEventListener('touchmove', function(e) {
+            var t = e.touches[0];
+            var r = slide.getBoundingClientRect();
+            mouseXN = (t.clientX - r.left) / r.width;
+            mouseYN = (t.clientY - r.top)  / r.height;
+          }, {passive: true});
+          slide.addEventListener('touchend', function() {
+            hovering = false; intensityTarget = 0;
+          }, {passive: true});
         };
 
         sk.draw = function() {
           if (!imgLoaded) return;
           framesSinceLoad++;
-
-          // Proactive reload before bytes degrade — always resets clean
-          if (framesSinceLoad >= RELOAD_INTERVAL) {
-            reload();
-            return;
-          }
+          if (framesSinceLoad >= RELOAD_INTERVAL) { reload(); return; }
 
           intensity += (intensityTarget - intensity) * 0.015;
           glitch.resetBytes();
