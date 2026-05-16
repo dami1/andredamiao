@@ -113,13 +113,13 @@ a:visited{color:var(--fg);}
 .site-name{
   font-family:'Barlow Condensed',Arial Narrow,sans-serif;
   font-weight:200;
-  font-size:clamp(52px,8vw,92px);
+  font-size:clamp(24px,7vw,92px);
   line-height:1;letter-spacing:-0.02em;
-  text-transform:uppercase;white-space:nowrap;
+  text-transform:uppercase;
+  white-space:normal;
+  word-break:break-word;
   position:relative;z-index:1;user-select:none;
-  /* transparent so canvas shows through, with mix-blend for legibility */
-  color:var(--fg);
-  mix-blend-mode:difference;
+  visibility:hidden;
 }
 .site-meta{
   margin-top:10px;font-size:11px;
@@ -326,6 +326,42 @@ canvas, img, svg, rect {
 .lang-btn:hover  { color: var(--fg); }
 .lang-sep { font-size: 10px; color: var(--lt); }
 
+
+/* Carousel hover — CSS glitch effect, no JS overhead */
+.cs-item img.fallback {
+  transition: filter 0.8s ease;
+}
+.cs-item:hover img.fallback,
+.cs-item:active img.fallback {
+  filter: grayscale(100%) contrast(1.6) brightness(0.85);
+  animation: cssglitch 0.15s steps(1) infinite;
+}
+@keyframes cssglitch {
+  0%   { filter: grayscale(100%) contrast(1.6) brightness(0.85) hue-rotate(0deg); transform: translateX(0); }
+  25%  { filter: grayscale(100%) contrast(2.0) brightness(1.1);                   transform: translateX(-3px); }
+  50%  { filter: grayscale(100%) contrast(1.3) brightness(0.7);                   transform: translateX(2px); }
+  75%  { filter: grayscale(100%) contrast(1.8) brightness(0.9);                   transform: translateX(-1px); }
+  100% { filter: grayscale(100%) contrast(1.6) brightness(0.85);                  transform: translateX(0); }
+}
+
+
+/* ── MOBILE ── */
+@media (max-width: 768px) {
+  .page { padding: 0 18px 80px; }
+  .cs-item { flex: 0 0 85vw; }
+  .cs-outer { height: 55vw; min-height: 180px; }
+  .main-layout { grid-template-columns: 1fr; }
+  .sidebar { border-right: none; border-bottom: 1px solid var(--lt); padding-right: 0; padding-bottom: 16px; }
+  .nav a { margin-right: 14px; font-size: 11.5px; }
+  .nav-spacer { display: none; }
+  .nav .lang-btn { margin-left: auto; }
+  /* On mobile: hide p5 canvas, show HTML title directly */
+  #title-canvas { display: none !important; }
+  .site-name { visibility: visible !important; }
+  /* Touch feedback on carousel */
+  .cs-item:active img.fallback { filter: grayscale(100%) contrast(1.8) brightness(0.8); }
+}
+
 </style>
 </head>
 <body>
@@ -438,17 +474,8 @@ canvas, img, svg, rect {
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/p5@1.9.0/lib/p5.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/p5.glitch@latest/p5.glitch.js"></script>
 
 <script>
-const IMG_DATA = [
-  "imagens/imagemweb2.jpg",
-  "imagens/narva2_perf.jpg",
-  "imagens/NarvaparaImpressao.jpg",
-  "imagens/DTS4699mam-foto-WEB.jpg",
-  "imagens/cloro1.jpg",
-  "imagens/contraquem3.jpg"
-];
 
 // ═══════════════════════════════════════════════════════════
 // 1. TITLE GLITCH — p5.glitch renders text as image, glitches
@@ -497,8 +524,8 @@ new p5(function(sk) {
     const header = document.getElementById('siteHeader');
     const nameEl = document.getElementById('sname');
     W = header.offsetWidth || 800;
-    const fs = Math.min(130, Math.max(72, W * 0.115));
-    H = Math.round(fs * 1.15);
+    const fs = Math.min(92, Math.max(28, W * 0.09));
+    H = Math.round(fs * 1.2);
 
     const cnv = sk.createCanvas(W, H);
     cnv.elt.id = 'title-canvas';
@@ -507,7 +534,7 @@ new p5(function(sk) {
     nameEl.style.visibility = 'hidden';
 
     sk.pixelDensity(1);
-    sk.frameRate(30);
+    sk.frameRate(20);
     sk.noLoop();
 
     const pg = sk.createGraphics(W, H);
@@ -520,7 +547,7 @@ new p5(function(sk) {
     pg.loadPixels();
 
     const pix = pg.pixels, PW = pg.width, PH = pg.height;
-    const GRID = 3;
+    const GRID = 5;
     const rows = {};
     for (let y = 0; y < PH; y += GRID) {
       for (let x = 0; x < PW; x += GRID) {
@@ -668,7 +695,7 @@ function makeSono(id, specs) {
       const cnv = sk.createCanvas(W, H);
       cnv.parent(id);
       sk.pixelDensity(1);
-      sk.frameRate(30);
+      sk.frameRate(20);
 
       const DOT = 2, GAP = 1, STEP = DOT + GAP;
 
@@ -700,32 +727,19 @@ function makeSono(id, specs) {
         };
       });
 
-      cnv.elt.addEventListener('mouseenter', function() { mouseOver = true; });
-      cnv.elt.addEventListener('mouseleave', function() {
+      // Unified pointer events — works for mouse and touch
+      cnv.elt.style.touchAction = 'none';
+      cnv.elt.addEventListener('pointerenter', function() { mouseOver = true; });
+      cnv.elt.addEventListener('pointerleave', function() {
         mouseOver = false;
         strands.forEach(st => st.dots.forEach(d => { d.ampTarget = 0; }));
       });
-      cnv.elt.addEventListener('mousemove', function(e) {
+      cnv.elt.addEventListener('pointermove', function(e) {
         const rect = cnv.elt.getBoundingClientRect();
         mouseXL = e.clientX - rect.left;
         mouseYL = e.clientY - rect.top;
-      });
-      // Touch support
-      cnv.elt.addEventListener('touchstart', function(e) {
         mouseOver = true;
-        const rect = cnv.elt.getBoundingClientRect();
-        mouseXL = e.touches[0].clientX - rect.left;
-        mouseYL = e.touches[0].clientY - rect.top;
-      }, {passive:true});
-      cnv.elt.addEventListener('touchmove', function(e) {
-        const rect = cnv.elt.getBoundingClientRect();
-        mouseXL = e.touches[0].clientX - rect.left;
-        mouseYL = e.touches[0].clientY - rect.top;
-      }, {passive:true});
-      cnv.elt.addEventListener('touchend', function() {
-        mouseOver = false;
-        strands.forEach(st => st.dots.forEach(d => { d.ampTarget = 0; }));
-      }, {passive:true});
+      });
     };
 
     sk.draw = function() {
@@ -832,117 +846,6 @@ makeSono('sono4', [
 // 5. CAROUSEL SCROLL
 // ═══════════════════════════════════════════════════════════
 
-// ── CAROUSEL SLIDES — p5.glitch localised to mouse position ──
-(function() {
-  for (var i = 0; i < 6; i++) {
-    (function(idx) {
-      new p5(function(sk) {
-        var glitch;
-        var hovering        = false;
-        var imgLoaded       = false;
-        var mouseXN         = 0;
-        var mouseYN         = 0;
-        var intensity       = 0;
-        var intensityTarget = 0;
-        var framesSinceLoad = 0;
-        var RELOAD_INTERVAL = 120;
-
-        function reload() {
-          var slide = document.getElementById('csi' + idx);
-          if (!slide) return;
-          var fb = slide.querySelector('.fallback');
-          if (!fb) return;
-          imgLoaded = false;
-          glitch.loadType('jpg');
-          glitch.loadQuality(0.3);
-          // Load via p5.loadImage with the file URL — no base64 conversion needed
-          sk.loadImage(fb.src, function(p5img) {
-            glitch.loadImage(p5img);
-            imgLoaded = true;
-            framesSinceLoad = 0;
-          }, function(err) {
-            console.warn('glitch loadImage error:', err);
-          });
-        }
-
-        sk.setup = function() {
-          var slide = document.getElementById('csi' + idx);
-          if (!slide) return;
-          var W = slide.offsetWidth  || 460;
-          var H = slide.offsetHeight || 400;
-          var cnv = sk.createCanvas(W, H);
-          cnv.style('position','absolute');
-          cnv.style('inset','0');
-          cnv.style('z-index','2');
-          cnv.parent('csi' + idx);
-          sk.pixelDensity(1);
-          sk.imageMode(sk.CORNER);
-          sk.frameRate(20);
-          var fb = slide.querySelector('.fallback');
-          if (fb) fb.style.zIndex = '0';
-
-          glitch = new Glitch(sk);
-          glitch.errors(false);
-          reload();
-
-          // Mouse events
-          slide.addEventListener('mouseenter', function() { hovering=true;  intensityTarget=1; });
-          slide.addEventListener('mouseleave', function() { hovering=false; intensityTarget=0; });
-          slide.addEventListener('mousemove',  function(e) {
-            var r = slide.getBoundingClientRect();
-            mouseXN = (e.clientX - r.left) / r.width;
-            mouseYN = (e.clientY - r.top)  / r.height;
-          });
-          slide.addEventListener('click', function() { reload(); });
-
-          // Touch events
-          slide.addEventListener('touchstart', function(e) {
-            hovering = true; intensityTarget = 1;
-            var t = e.touches[0];
-            var r = slide.getBoundingClientRect();
-            mouseXN = (t.clientX - r.left) / r.width;
-            mouseYN = (t.clientY - r.top)  / r.height;
-          }, {passive: true});
-          slide.addEventListener('touchmove', function(e) {
-            var t = e.touches[0];
-            var r = slide.getBoundingClientRect();
-            mouseXN = (t.clientX - r.left) / r.width;
-            mouseYN = (t.clientY - r.top)  / r.height;
-          }, {passive: true});
-          slide.addEventListener('touchend', function() {
-            hovering = false; intensityTarget = 0;
-          }, {passive: true});
-        };
-
-        sk.draw = function() {
-          if (!imgLoaded) return;
-          framesSinceLoad++;
-          if (framesSinceLoad >= RELOAD_INTERVAL) { reload(); return; }
-
-          intensity += (intensityTarget - intensity) * 0.015;
-          glitch.resetBytes();
-
-          if (intensity > 0.01) {
-            var bs = Math.max(0, mouseYN - (0.02 + intensity * 0.04));
-            var be = Math.min(1, mouseYN + (0.02 + intensity * 0.04));
-            glitch.limitBytes(bs, be);
-            var n = Math.floor(intensity * (2 + mouseXN * 18));
-            if (n > 0) glitch.randomBytes(n);
-            if (intensity > 0.5) glitch.replaceHex('ffdb00430001','ffdb004300ff');
-          }
-
-          glitch.buildImage(function(img) {
-            if (!img) { reload(); return; }
-            sk.clear();
-            sk.tint(255);
-            sk.image(img, 0, 0, sk.width, sk.height);
-            sk.filter(sk.GRAY);
-          });
-        };
-      });
-    })(i);
-  }
-})();
 
 (function() {
   const outer = document.getElementById('csOuter');
