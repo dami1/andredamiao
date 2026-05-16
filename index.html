@@ -546,41 +546,56 @@ canvas, img, svg, rect {
             console.warn('glitch: could not load', img.arquivo, err);
           });
 
-          // Pointer events — hover + touch
+          // Unified input — mouse hover + touch continuous tracking
           slide.style.touchAction = 'none';
-          slide.addEventListener('pointerenter', function() {
-            hovering = true;
-          });
-          slide.addEventListener('pointermove', function(e) {
+
+          function glitchMove(e) {
             hovering = true;
             var r = slide.getBoundingClientRect();
             mouseXN = (e.clientX - r.left) / r.width;
             mouseYN = (e.clientY - r.top)  / r.height;
-          });
+          }
+          function glitchEnd(e) {
+            hovering = false;
+          }
+
+          // Mouse hover
+          slide.addEventListener('pointermove', glitchMove);
+          slide.addEventListener('pointerleave', glitchEnd);
+
+          // Touch — capture for continuous tracking
           slide.addEventListener('pointerdown', function(e) {
-            slide.setPointerCapture(e.pointerId);
-            hovering = true;
-            var r = slide.getBoundingClientRect();
-            mouseXN = (e.clientX - r.left) / r.width;
-            mouseYN = (e.clientY - r.top)  / r.height;
+            if (e.pointerType === 'touch') {
+              slide.setPointerCapture(e.pointerId);
+              glitchMove(e);
+            }
           });
-          slide.addEventListener('pointerup', function(e) {
-            if (e.pointerType === 'touch') hovering = false;
-          });
-          slide.addEventListener('pointerleave', function() {
-            hovering = false;
-          });
-          slide.addEventListener('pointercancel', function() {
-            hovering = false;
-          });
+          slide.addEventListener('pointerup',     function(e) { if (e.pointerType === 'touch') glitchEnd(); });
+          slide.addEventListener('pointercancel', glitchEnd);
         };
+
+        var framesSinceLoad = 0;
+
+        function reloadGlitch() {
+          loaded = false;
+          glitch.loadType('jpg');
+          glitch.loadQuality(0.3);
+          sk.loadImage('imagens/' + img.arquivo, function(p5img) {
+            glitch.loadImage(p5img);
+            loaded = true;
+            framesSinceLoad = 0;
+          });
+        }
 
         sk.draw = function() {
           if (!loaded) return;
+          framesSinceLoad++;
+          // Reload every 150 frames to prevent byte state degradation
+          if (framesSinceLoad > 150) { reloadGlitch(); return; }
 
-          // Slow spring
+          // Spring — faster for immediate visual response
           var target = hovering ? 1 : 0;
-          intensity += (target - intensity) * 0.015;
+          intensity += (target - intensity) * 0.08;
 
           glitch.resetBytes();
 
@@ -674,7 +689,7 @@ new p5(function(sk) {
     const pix = pg.pixels, PW = pg.width, PH = pg.height;
     // Adaptive grid: smaller = more dots = better quality
     // On mobile (small W) use tighter grid so title doesn't look broken
-    const GRID = W < 500 ? 3 : W < 800 ? 4 : 5;
+    const GRID = W < 400 ? 6 : W < 600 ? 5 : W < 900 ? 4 : 3; // coarser on mobile = clearer shapes
     const rows = {};
     for (let y = 0; y < PH; y += GRID) {
       for (let x = 0; x < PW; x += GRID) {
@@ -770,32 +785,33 @@ new p5(function(sk) {
 
     sampleText(W, fs, H);
 
-    // Pointer events — mouse hover + touch drag
+    // Unified input — mouse hover + touch continuous tracking
     header.style.touchAction = 'none';
 
-    function trackTitle(e) {
+    function titleMove(e) {
       mouseOver = true; decompTarget = 1;
       const rect = header.getBoundingClientRect();
       mouseXLocal = e.clientX - rect.left;
-      particles.forEach(s => { s.ampTarget = 14 + Math.random() * 10; });
+      particles.forEach(s => { s.ampTarget = 16 + Math.random() * 8; });
     }
-    function releaseTitle() {
+    function titleEnd() {
       mouseOver = false; decompTarget = 0;
       particles.forEach(s => s.dots.forEach(d => { d.ampTarget = 0; }));
     }
-    // pointermove activates on desktop hover AND touch drag
-    header.addEventListener('pointermove', trackTitle);
-    // pointerdown for touch tap + capture
+
+    // Mouse hover — no click needed
+    header.addEventListener('pointermove', titleMove);
+    header.addEventListener('pointerleave', titleEnd);
+
+    // Touch — capture and track continuously
     header.addEventListener('pointerdown', function(e) {
-      header.setPointerCapture(e.pointerId);
-      trackTitle(e);
+      if (e.pointerType === 'touch') {
+        header.setPointerCapture(e.pointerId);
+        titleMove(e);
+      }
     });
-    // release: touch = pointerup, mouse = pointerleave
-    header.addEventListener('pointerup',     function(e) {
-      if (e.pointerType === 'touch') releaseTitle();
-    });
-    header.addEventListener('pointerleave',  releaseTitle);
-    header.addEventListener('pointercancel', releaseTitle);
+    header.addEventListener('pointerup',     function(e) { if (e.pointerType === 'touch') titleEnd(); });
+    header.addEventListener('pointercancel', titleEnd);
   };
 
   sk.draw = function() {
@@ -805,8 +821,8 @@ new p5(function(sk) {
     sk.noStroke();
 
     // Influence radius: dots within ~120px of mouse get full amp
-    const RADIUS = 120;
-    const MAX_AMP = 14;
+    const RADIUS = W < 600 ? W * 0.25 : 160; // proportional radius
+    const MAX_AMP = 16;
 
     for (const strand of particles) {
       strand.scroll = (strand.scroll + strand.speed) % 1;
@@ -820,8 +836,8 @@ new p5(function(sk) {
         } else {
           dot.ampTarget = 0;
         }
-        // slow spring — 0.015 instead of 0.032
-        dot.amp += (dot.ampTarget - dot.amp) * 0.015;
+        // faster spring for snappier response
+        dot.amp += (dot.ampTarget - dot.amp) * 0.055;
       });
 
       sk.fill(240, 237, 230);
@@ -938,36 +954,35 @@ function makeSono(id, specs) {
         };
       });
 
-      // Pointer events — works for mouse hover AND touch drag
+      // Unified input — mouse hover + touch continuous tracking
       cnv.elt.style.touchAction = 'none';
-      cnv.elt.addEventListener('pointerdown', function(e) {
-        cnv.elt.setPointerCapture(e.pointerId);
+
+      function sonoMove(clientX, clientY) {
+        const rect = cnv.elt.getBoundingClientRect();
+        rawX = clientX - rect.left;
+        rawY = clientY - rect.top;
         mouseOver = true;
-        const rect = cnv.elt.getBoundingClientRect();
-        rawX = e.clientX - rect.left;
-        rawY = e.clientY - rect.top;
-      });
+      }
+      function sonoEnd() {
+        mouseOver = false;
+        strands.forEach(st => st.dots.forEach(d => { d.ampTarget = 0; }));
+      }
+
+      // Mouse: pointermove covers hover (no click needed)
       cnv.elt.addEventListener('pointermove', function(e) {
-        const rect = cnv.elt.getBoundingClientRect();
-        rawX = e.clientX - rect.left;
-        rawY = e.clientY - rect.top;
-        mouseOver = true; // always active on move (desktop hover + touch drag)
+        sonoMove(e.clientX, e.clientY);
       });
-      cnv.elt.addEventListener('pointerup', function(e) {
-        // On touch: release ends interaction
+      cnv.elt.addEventListener('pointerleave', sonoEnd);
+
+      // Touch: capture + track continuously
+      cnv.elt.addEventListener('pointerdown', function(e) {
         if (e.pointerType === 'touch') {
-          mouseOver = false;
-          strands.forEach(st => st.dots.forEach(d => { d.ampTarget = 0; }));
+          cnv.elt.setPointerCapture(e.pointerId);
+          sonoMove(e.clientX, e.clientY);
         }
       });
-      cnv.elt.addEventListener('pointerleave', function() {
-        mouseOver = false;
-        strands.forEach(st => st.dots.forEach(d => { d.ampTarget = 0; }));
-      });
-      cnv.elt.addEventListener('pointercancel', function() {
-        mouseOver = false;
-        strands.forEach(st => st.dots.forEach(d => { d.ampTarget = 0; }));
-      });
+      cnv.elt.addEventListener('pointerup',     function(e) { if (e.pointerType === 'touch') sonoEnd(); });
+      cnv.elt.addEventListener('pointercancel', sonoEnd);
     };
 
     sk.draw = function() {
@@ -999,7 +1014,7 @@ function makeSono(id, specs) {
           } else {
             dot.ampTarget = 0;
           }
-          dot.amp += (dot.ampTarget - dot.amp) * 0.015;
+          dot.amp += (dot.ampTarget - dot.amp) * 0.055;
         });
 
         sk.fill(240, 237, 230, st.a);
