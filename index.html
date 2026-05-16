@@ -77,7 +77,7 @@
 
 *{margin:0;padding:0;box-sizing:border-box;}
 :root{
-  --bg:#0a0a0a;--fg:#f0ede6;--dim:#555;--lt:#2a2a2a;
+  --bg:#0a0a0a;--fg:#f0ede6;--dim:#999;--lt:#666;
 }
 body{
   background:var(--bg);color:var(--fg);
@@ -559,7 +559,9 @@ new p5(function(sk) {
     pg.text('ANDRÉ DAMIÃO', 0, fs * 0.88);
     pg.loadPixels();
     const pix = pg.pixels, PW = pg.width, PH = pg.height;
-    const GRID = 5;
+    // Adaptive grid: smaller = more dots = better quality
+    // On mobile (small W) use tighter grid so title doesn't look broken
+    const GRID = W < 500 ? 3 : W < 800 ? 4 : 5;
     const rows = {};
     for (let y = 0; y < PH; y += GRID) {
       for (let x = 0; x < PW; x += GRID) {
@@ -637,7 +639,7 @@ new p5(function(sk) {
     const nameEl = document.getElementById('sname');
     W = header.offsetWidth || 800;
     const fs = Math.min(92, Math.max(28, W * 0.09));
-    H = Math.round(fs * 1.2);
+    H = Math.round(fs * 1.5); // extra headroom for descenders
 
     let cnv = sk.createCanvas(W, H);
     cnv.elt.id = 'title-canvas';
@@ -653,17 +655,32 @@ new p5(function(sk) {
 
     sampleText(W, fs, H);
 
-    // track mouse X over the header
-    header.addEventListener('mouseenter', function() { mouseOver = true; });
-    header.addEventListener('mouseleave', function() {
-      mouseOver = false;
-      // decay all dots
-      particles.forEach(s => s.dots.forEach(d => { d.ampTarget = 0; }));
-    });
-    header.addEventListener('mousemove', function(e) {
+    // Pointer events — mouse hover + touch drag
+    header.style.touchAction = 'none';
+
+    function trackTitle(e) {
+      mouseOver = true; decompTarget = 1;
       const rect = header.getBoundingClientRect();
       mouseXLocal = e.clientX - rect.left;
+      particles.forEach(s => { s.ampTarget = 14 + Math.random() * 10; });
+    }
+    function releaseTitle() {
+      mouseOver = false; decompTarget = 0;
+      particles.forEach(s => s.dots.forEach(d => { d.ampTarget = 0; }));
+    }
+    // pointermove activates on desktop hover AND touch drag
+    header.addEventListener('pointermove', trackTitle);
+    // pointerdown for touch tap + capture
+    header.addEventListener('pointerdown', function(e) {
+      header.setPointerCapture(e.pointerId);
+      trackTitle(e);
     });
+    // release: touch = pointerup, mouse = pointerleave
+    header.addEventListener('pointerup',     function(e) {
+      if (e.pointerType === 'touch') releaseTitle();
+    });
+    header.addEventListener('pointerleave',  releaseTitle);
+    header.addEventListener('pointercancel', releaseTitle);
   };
 
   sk.draw = function() {
@@ -693,12 +710,13 @@ new p5(function(sk) {
       });
 
       sk.fill(240, 237, 230);
+      const DOT = W < 500 ? 3 : 2; // slightly larger dots on mobile
       for (const dot of strand.dots) {
         if (dot.amp < 0.05) {
-          sk.rect(dot.ox, dot.oy, 2, 2);
+          sk.rect(dot.ox, dot.oy, DOT, DOT);
         } else {
           const dy = waveVal(strand.type, dot.t, strand.scroll, strand.freq, strand.phase, dot.amp, strand.noise);
-          sk.rect(dot.ox, dot.oy - dy, 2, 2);
+          sk.rect(dot.ox, dot.oy - dy, DOT, DOT);
         }
       }
     }
@@ -706,17 +724,17 @@ new p5(function(sk) {
 
   sk.windowResized = function() {
     const header = document.getElementById('siteHeader');
-    const nameEl  = document.getElementById('sname');
     if (!header) return;
-    // Fully re-render at new size
     W = header.offsetWidth;
-    const newFs = Math.min(92, Math.max(24, W * 0.09));
-    const newH  = Math.round(newFs * 1.2);
+    const newFs = Math.min(92, Math.max(22, W * 0.09));
+    const newH  = Math.round(newFs * 1.5);
+    cnv.elt.style.width  = W + 'px';
+    cnv.elt.style.height = newH + 'px';
     sk.resizeCanvas(W, newH);
-    cnv.elt.style.top = '44px';
-    // Re-sample particles at new size
-    particles = [];
-    textReady = false;
+    // Clear and re-sample at new resolution
+    particles  = [];
+    textReady  = false;
+    mouseOver  = false;
     sampleText(W, newFs, newH);
   };
 });
@@ -724,7 +742,7 @@ new p5(function(sk) {
 function makeSono(id, specs) {
   new p5(function(sk) {
     let W, H, fn = 0;
-    let mouseOver = false, mouseXL = 0, mouseYL = 0;
+    let mouseOver = false, mouseXL = 0, mouseYL = 0, rawX = 0, rawY = 0;
     let strands = [];
 
   function waveVal(type, t, scroll, freq, phase, amp, noise) {
@@ -764,8 +782,10 @@ function makeSono(id, specs) {
     sk.setup = function() {
       const wrap = document.getElementById(id);
       if (!wrap) return;
-      W = wrap.offsetWidth || 828;
+      // Use actual layout width — fallback if not yet painted
+      W = wrap.getBoundingClientRect().width || wrap.offsetWidth || 828;
       H = wrap.offsetHeight || 50;
+      if (W < 10) W = window.innerWidth - 72 || 828; // mobile fallback
       const cnv = sk.createCanvas(W, H);
       cnv.parent(id);
       sk.pixelDensity(1);
@@ -801,19 +821,35 @@ function makeSono(id, specs) {
         };
       });
 
-      // Unified pointer events — mouse + touch
+      // Pointer events — works for mouse hover AND touch drag
       cnv.elt.style.touchAction = 'none';
-      let rawX = 0, rawY = 0; // raw pointer pos
-      cnv.elt.addEventListener('pointerenter', function() { mouseOver = true; });
-      cnv.elt.addEventListener('pointerleave', function() {
-        mouseOver = false;
-        strands.forEach(st => st.dots.forEach(d => { d.ampTarget = 0; }));
+      cnv.elt.addEventListener('pointerdown', function(e) {
+        cnv.elt.setPointerCapture(e.pointerId);
+        mouseOver = true;
+        const rect = cnv.elt.getBoundingClientRect();
+        rawX = e.clientX - rect.left;
+        rawY = e.clientY - rect.top;
       });
       cnv.elt.addEventListener('pointermove', function(e) {
         const rect = cnv.elt.getBoundingClientRect();
         rawX = e.clientX - rect.left;
         rawY = e.clientY - rect.top;
-        mouseOver = true;
+        mouseOver = true; // always active on move (desktop hover + touch drag)
+      });
+      cnv.elt.addEventListener('pointerup', function(e) {
+        // On touch: release ends interaction
+        if (e.pointerType === 'touch') {
+          mouseOver = false;
+          strands.forEach(st => st.dots.forEach(d => { d.ampTarget = 0; }));
+        }
+      });
+      cnv.elt.addEventListener('pointerleave', function() {
+        mouseOver = false;
+        strands.forEach(st => st.dots.forEach(d => { d.ampTarget = 0; }));
+      });
+      cnv.elt.addEventListener('pointercancel', function() {
+        mouseOver = false;
+        strands.forEach(st => st.dots.forEach(d => { d.ampTarget = 0; }));
       });
     };
 
