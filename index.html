@@ -358,6 +358,25 @@ canvas, img, svg, rect {
   .cs-item:active img.fallback { filter: grayscale(100%) contrast(1.8) brightness(0.8); }
 }
 
+
+/* ── IMAGE GLITCH — CSS only, zero CPU cost ── */
+.cs-item img.fallback {
+  filter: grayscale(100%) contrast(1.05);
+  transition: filter 0.6s ease;
+}
+.cs-item.glitch-active img.fallback,
+.cs-item:hover img.fallback {
+  animation: imgglitch 0.12s steps(1) infinite;
+}
+@keyframes imgglitch {
+  0%   { filter: grayscale(100%) contrast(1.8) brightness(0.9);  transform: translateX(0);    }
+  20%  { filter: grayscale(100%) contrast(2.2) brightness(1.15); transform: translateX(-4px); }
+  40%  { filter: grayscale(80%)  contrast(1.5) brightness(0.75); transform: translateX(3px);  }
+  60%  { filter: grayscale(100%) contrast(2.0) brightness(1.0);  transform: translateX(-2px); }
+  80%  { filter: grayscale(90%)  contrast(1.7) brightness(0.85); transform: translateX(1px);  }
+  100% { filter: grayscale(100%) contrast(1.8) brightness(0.9);  transform: translateX(0);    }
+}
+
 </style>
 </head>
 <body>
@@ -440,7 +459,6 @@ canvas, img, svg, rect {
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/p5@1.9.0/lib/p5.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/p5.glitch@latest/p5.glitch.js"></script>
 
 <script>
 // ── LOAD IMAGES FROM JSON ────────────────────────────────
@@ -486,6 +504,13 @@ canvas, img, svg, rect {
       cap.textContent = currentLang === 'en' ? img.legenda_en : img.legenda;
       div.appendChild(cap);
 
+      // Touch: toggle glitch-active class for CSS effect
+      div.addEventListener('pointerdown', function(e) {
+        if (e.pointerType === 'touch') div.classList.add('glitch-active');
+      });
+      div.addEventListener('pointerup',     function() { div.classList.remove('glitch-active'); });
+      div.addEventListener('pointercancel', function() { div.classList.remove('glitch-active'); });
+
       return div;
     }
 
@@ -495,133 +520,7 @@ canvas, img, svg, rect {
     // Init carousel scroll after slides are built
     initCarousel(imgs.length);
 
-    // Init p5.glitch on each original slide (not duplicates)
-    // Wait one frame so DOM is painted and img.src is accessible
-    requestAnimationFrame(function() {
-      initGlitchSlides(imgs);
-    });
   }
-
-  // ── p5.glitch per slide ─────────────────────────────────
-  window.initGlitchSlides = function(imgs) {
-    imgs.forEach(function(img, idx) {
-      var slide = document.getElementById('csi' + idx);
-      if (!slide) return;
-
-      new p5(function(sk) {
-        var glitch;
-        var loaded    = false;
-        var hovering  = false;
-        var intensity = 0;
-        var mouseXN   = 0.5;
-        var mouseYN   = 0.5;
-
-        sk.setup = function() {
-          var W = slide.offsetWidth  || 460;
-          var H = slide.offsetHeight || 400;
-          var cnv = sk.createCanvas(W, H);
-          cnv.style('position', 'absolute');
-          cnv.style('inset', '0');
-          cnv.style('z-index', '2');
-          cnv.parent(slide);
-          sk.pixelDensity(1);
-          sk.frameRate(20);
-          sk.noLoop();
-
-          // Hide fallback img
-          var fb = slide.querySelector('.fallback');
-          if (fb) fb.style.zIndex = '0';
-
-          glitch = new Glitch(sk);
-          glitch.errors(false);
-          glitch.loadType('jpg');
-          glitch.loadQuality(0.3);
-
-          // Load via p5.loadImage callback — correct API pattern
-          sk.loadImage('imagens/' + img.arquivo, function(p5img) {
-            glitch.loadImage(p5img);
-            loaded = true;
-            sk.loop();
-          }, function(err) {
-            console.warn('glitch: could not load', img.arquivo, err);
-          });
-
-          // Unified input — mouse hover + touch continuous tracking
-          slide.style.touchAction = 'none';
-
-          function glitchMove(e) {
-            hovering = true;
-            var r = slide.getBoundingClientRect();
-            mouseXN = (e.clientX - r.left) / r.width;
-            mouseYN = (e.clientY - r.top)  / r.height;
-          }
-          function glitchEnd(e) {
-            hovering = false;
-          }
-
-          // Mouse hover
-          slide.addEventListener('pointermove', glitchMove);
-          slide.addEventListener('pointerleave', glitchEnd);
-
-          // Touch — capture for continuous tracking
-          slide.addEventListener('pointerdown', function(e) {
-            if (e.pointerType === 'touch') {
-              slide.setPointerCapture(e.pointerId);
-              glitchMove(e);
-            }
-          });
-          slide.addEventListener('pointerup',     function(e) { if (e.pointerType === 'touch') glitchEnd(); });
-          slide.addEventListener('pointercancel', glitchEnd);
-        };
-
-        var framesSinceLoad = 0;
-
-        function reloadGlitch() {
-          loaded = false;
-          glitch.loadType('jpg');
-          glitch.loadQuality(0.3);
-          sk.loadImage('imagens/' + img.arquivo, function(p5img) {
-            glitch.loadImage(p5img);
-            loaded = true;
-            framesSinceLoad = 0;
-          });
-        }
-
-        sk.draw = function() {
-          if (!loaded) return;
-          framesSinceLoad++;
-          // Reload every 150 frames to prevent byte state degradation
-          if (framesSinceLoad > 150) { reloadGlitch(); return; }
-
-          // Spring — faster for immediate visual response
-          var target = hovering ? 1 : 0;
-          intensity += (target - intensity) * 0.08;
-
-          glitch.resetBytes();
-
-          if (intensity > 0.01) {
-            // Limit corruption to band near mouse Y
-            var bs = Math.max(0, mouseYN - (0.02 + intensity * 0.06));
-            var be = Math.min(1, mouseYN + (0.02 + intensity * 0.06));
-            glitch.limitBytes(bs, be);
-            var n = Math.floor(intensity * (3 + mouseXN * 15));
-            if (n > 0) glitch.randomBytes(n);
-            if (intensity > 0.6) {
-              glitch.replaceHex('ffdb00430001', 'ffdb004300ff');
-            }
-          }
-
-          glitch.buildImage(function(img) {
-            if (!img) return;
-            sk.clear();
-            sk.tint(255);
-            sk.image(img, 0, 0, sk.width, sk.height);
-            sk.filter(sk.GRAY);
-          });
-        };
-      });
-    });
-  };
 
   window.initCarousel = function(N) {
     var outer = document.getElementById('csOuter');
@@ -778,7 +677,7 @@ new p5(function(sk) {
     nameEl.style.visibility = 'hidden';
 
     sk.pixelDensity(1);
-    sk.frameRate(20);
+    sk.frameRate(15);
     sk.noLoop();
 
 
@@ -922,7 +821,7 @@ function makeSono(id, specs) {
       const cnv = sk.createCanvas(W, H);
       cnv.parent(id);
       sk.pixelDensity(1);
-      sk.frameRate(20);
+      sk.frameRate(12);
 
       const DOT = 2, GAP = 1, STEP = DOT + GAP;
 
