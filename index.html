@@ -93,9 +93,10 @@ a:visited{color:var(--fg);}
 .page{
   position:relative;z-index:1;
   padding:0 24px 0;
-  min-height:100vh;
+  height:100vh;
   display:flex;
   flex-direction:column;
+  overflow:hidden;
 }
 
 /* HEADER */
@@ -155,14 +156,16 @@ a:visited{color:var(--fg);}
 /* CAROUSEL */
 .cs-outer{
   width:100%;overflow:hidden;
-  position:relative;flex:1;min-height:300px;
+  position:relative;
+  flex:1;
+  min-height:400px;
   border-top:2px solid var(--fg);
   border-bottom:2px solid var(--fg);
   background:#000;cursor:grab;
 }
 .cs-outer:active{cursor:grabbing;}
 .cs-track{display:flex;height:100%;gap:2px;will-change:transform;user-select:none;}
-.cs-item{flex:0 0 460px;height:100%;position:relative;overflow:hidden;}
+.cs-item{flex:0 0 460px;height:100%;min-height:400px;position:relative;overflow:hidden;}
 
 /* p5 renders INTO this canvas replacing the img */
 .cs-item canvas{
