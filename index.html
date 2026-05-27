@@ -354,6 +354,7 @@ canvas, img, svg, rect {
 
 /* ── MOBILE ── */
 @media (max-width: 768px) {
+  * { cursor: none !important; }
   .page { padding: 0 16px 0; }
   .cs-item { flex: 0 0 85vw; }
   .cs-outer { flex: 1; min-height: 55vw; }
@@ -364,23 +365,6 @@ canvas, img, svg, rect {
 }
 
 
-/* ── IMAGE GLITCH — CSS only, zero CPU cost ── */
-.cs-item img.fallback {
-  filter: grayscale(100%) contrast(1.05);
-  transition: filter 0.6s ease;
-}
-.cs-item.glitch-active img.fallback,
-.cs-item:hover img.fallback {
-  animation: imgglitch 0.12s steps(1) infinite;
-}
-@keyframes imgglitch {
-  0%   { filter: grayscale(100%) contrast(1.8) brightness(0.9);  transform: translateX(0);    }
-  20%  { filter: grayscale(100%) contrast(2.2) brightness(1.15); transform: translateX(-4px); }
-  40%  { filter: grayscale(80%)  contrast(1.5) brightness(0.75); transform: translateX(3px);  }
-  60%  { filter: grayscale(100%) contrast(2.0) brightness(1.0);  transform: translateX(-2px); }
-  80%  { filter: grayscale(90%)  contrast(1.7) brightness(0.85); transform: translateX(1px);  }
-  100% { filter: grayscale(100%) contrast(1.8) brightness(0.9);  transform: translateX(0);    }
-}
 
 </style>
 </head>
@@ -412,124 +396,264 @@ canvas, img, svg, rect {
 
 <div class="sono-wrap" id="sono1" style="height:50px;margin-top:28px;"></div>
 
-<div class="cs-outer" id="csOuter">
-  <div class="cs-track" id="csTrack">
-    <!-- slides injected by JS from imagens/imagens.json -->
-  </div>
-</div>
+<div id="csOuter" style="flex:1;min-height:400px;border-top:2px solid var(--fg);position:relative;overflow:hidden;"></div>
 
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/p5@1.9.0/lib/p5.min.js"></script>
 
 <script>
-// ── LOAD IMAGES FROM JSON ────────────────────────────────
+// ── SINGLE P5 CAROUSEL ───────────────────────────────────
+// One sketch handles: image loading, scrolling, pixel effect, lens
 (function() {
-  var lang = 'pt';
-  try { lang = localStorage.getItem('ad-lang') || 'pt'; } catch(e) {}
 
-  var _imgsData = [];
+new p5(function(sk) {
+  var imgs = [];       // loaded p5 images
+  var imgFiles = [];   // filenames from JSON
+  var captions = [];
+  var N = 0;
+  var loaded = 0;
 
-  fetch('imagens/imagens.json?v=' + Date.now())
-    .then(function(r) { return r.json(); })
-    .then(function(imgs) {
-      _imgsData = imgs;
-      buildCarousel(imgs);
-    })
-    .catch(function(err) {
-      console.warn('Could not load imagens.json:', err);
-    });
+  var W, H;
+  var pos = 0;         // scroll position in px
+  var vel = 0;         // momentum
+  var dragStart = null, dragPos = 0;
+  var isDragging = false;
+  var ITEM_W;
 
-  function buildCarousel(imgs) {
-    var track = document.getElementById('csTrack');
-    if (!track) return;
+  // Mouse state for pixel effect
+  var mx = 0, my = 0;
+  var mouseOver = false;
+  var decompAmt = 0, decompTarget = 0;
 
-    var currentLang = 'pt';
-    try { currentLang = localStorage.getItem('ad-lang') || 'pt'; } catch(e) {}
+  // Per-image grain arrays (built once per image)
+  var grainSets = [];
+  var GRAIN = 8;
 
-    // Build slides — original set + duplicate for infinite scroll
-    function makeSlide(img, idx, isDupe) {
-      var div = document.createElement('div');
-      div.className = 'cs-item';
-      if (!isDupe) div.id = 'csi' + idx;
-
-      var im = document.createElement('img');
-      im.className = 'fallback';
-      im.src = 'imagens/' + img.arquivo;
-      im.onerror = function() { console.warn('Could not load: imagens/' + img.arquivo); };
-      im.alt = currentLang === 'en' ? img.legenda_en : img.legenda;
-      div.appendChild(im);
-
-      var cap = document.createElement('div');
-      cap.className = 'cs-cap';
-      cap.setAttribute('data-pt', img.legenda);
-      cap.setAttribute('data-en', img.legenda_en);
-      cap.textContent = currentLang === 'en' ? img.legenda_en : img.legenda;
-      div.appendChild(cap);
-
-      // Touch: toggle glitch-active class for CSS effect
-      div.addEventListener('pointerdown', function(e) {
-        if (e.pointerType === 'touch') div.classList.add('glitch-active');
-      });
-      div.addEventListener('pointerup',     function() { div.classList.remove('glitch-active'); });
-      div.addEventListener('pointercancel', function() { div.classList.remove('glitch-active'); });
-
-      return div;
+  function waveVal(type, t, scroll, freq, phase, amp, noise) {
+    const x = (t * freq + scroll) % 1;
+    const a = x * Math.PI * 2 + phase;
+    switch(type) {
+      case 0: return amp * Math.sin(a);
+      case 1: return amp * Math.max(-1, Math.min(1, Math.sin(a) * 3.5));
+      case 2: return amp * (2 * (x % 1) - 1);
+      case 3: {
+        if (!noise) return 0;
+        const pos = ((x + 1) % 1) * (noise.length - 1);
+        const i0  = Math.floor(pos) % noise.length;
+        const i1  = (i0 + 1) % noise.length;
+        return amp * (noise[i0] * (1-(pos%1)) + noise[i1] * (pos%1));
+      }
+      case 4: {
+        const p = ((x%1)+1)%1;
+        return amp * (p < 0.08 ? 1 : p < 0.16 ? -0.3 : 0);
+      }
     }
-
-    imgs.forEach(function(img, i) { track.appendChild(makeSlide(img, i, false)); });
-    imgs.forEach(function(img, i) { track.appendChild(makeSlide(img, i, true));  });
-
-    // Init carousel scroll after slides are built
-    initCarousel(imgs.length);
-
-
+    return 0;
   }
 
+  function makeNoise(npts) {
+    const freqs  = [1.3, 2.7, 5.1, 8.9];
+    const phases = freqs.map(() => Math.random() * Math.PI * 2);
+    const amps   = [0.45, 0.28, 0.17, 0.10];
+    const arr = [];
+    for (let k = 0; k <= npts; k++) {
+      const t = k / npts;
+      let v = 0;
+      freqs.forEach((f, i) => { v += amps[i] * Math.sin(t * Math.PI * 2 * f + phases[i]); });
+      arr.push(v);
+    }
+    return arr;
+  }
 
-  window.initCarousel = function(N) {
-    var outer = document.getElementById('csOuter');
-    var track = document.getElementById('csTrack');
-    var prev  = document.getElementById('csPrev');
-    var next  = document.getElementById('csNext');
-    if (!outer || !track) return;
+  function buildGrains(p5img, iW, iH) {
+    p5img.loadPixels();
+    var grains = [];
+    var si = 0;
+    for (var j = 0; j < iH; j += GRAIN) {
+      for (var i = 0; i < iW; i += GRAIN) {
+        var idx = (j * iW + i) * 4;
+        var r = p5img.pixels[idx], g = p5img.pixels[idx+1], b = p5img.pixels[idx+2];
+        var bv = (0.299*r + 0.587*g + 0.114*b) / 255;
+        var bright = Math.round(Math.pow(bv, 0.78) * 255);
+        var type = si%5, t = i/iW;
+        grains.push({
+          ox: i, oy: j, bright, type, t,
+          freq: 0.6+t*3.5, phase: Math.random()*Math.PI*2,
+          scroll: Math.random(), speed: 0.002+Math.random()*0.003,
+          noise: (type===3)?makeNoise(120):null,
+          amp:0, ampTarget:0
+        });
+        si++;
+      }
+    }
+    return grains;
+  }
 
-    var ITEM_W = 462, total = ITEM_W * N;
-    var pos=0, drag=false, ds=0, ps=0, timer, auto=true;
-    var rawPos = 0;
-    var SPD = 0.5;
+  sk.preload = function() {
+    sk.loadJSON('imagens/imagens.json?v=' + Date.now(), function(data) {
+      imgFiles = data.map(function(d) { return d.arquivo; });
+      captions = data;
+      N = imgFiles.length;
+      imgFiles.forEach(function(f, i) {
+        sk.loadImage('imagens/' + f, function(img) {
+          imgs[i] = img;
+          loaded++;
+        });
+      });
+    });
+  };
 
-    function cl() { if(pos>=total) pos-=total; if(pos<0) pos+=total; }
-    function rn() { track.style.transform = 'translateX(' + (-pos) + 'px)'; }
-    function lp() { if(auto&&!drag) { pos+=SPD; cl(); rn(); } requestAnimationFrame(lp); }
-    function sh(d) {
-      auto=false; pos+=d*ITEM_W; cl(); rn();
-      clearTimeout(timer); timer=setTimeout(function(){auto=true;},4000);
+  sk.setup = function() {
+    var wrap = document.getElementById('csOuter');
+    W = wrap.offsetWidth  || window.innerWidth;
+    H = wrap.offsetHeight || window.innerHeight - 200;
+    ITEM_W = W;  // each image fills full width
+
+    var cnv = sk.createCanvas(W, H);
+    cnv.parent('csOuter');
+    cnv.elt.style.display = 'block';
+    sk.pixelDensity(1);
+    sk.frameRate(20);
+    sk.imageMode(sk.CORNER);
+    sk.noStroke();
+
+    // Build grains for each image once loaded
+    // Done lazily in draw() when image first encountered
+
+    // Pointer events on the canvas
+    cnv.elt.style.touchAction = 'none';
+    cnv.elt.addEventListener('pointermove', function(e) {
+      var r = cnv.elt.getBoundingClientRect();
+      mx = e.clientX - r.left;
+      my = e.clientY - r.top;
+      mouseOver = true; decompTarget = 1;
+      if (isDragging) {
+        var dx = e.clientX - dragStart;
+        pos = dragPos - dx;
+      }
+    });
+    cnv.elt.addEventListener('pointerdown', function(e) {
+      cnv.elt.setPointerCapture(e.pointerId);
+      dragStart = e.clientX;
+      dragPos   = pos;
+      isDragging = true;
+      vel = 0;
+      mouseOver = true; decompTarget = 1;
+    });
+    cnv.elt.addEventListener('pointerup', function(e) {
+      isDragging = false;
+      if (e.pointerType === 'touch') { mouseOver = false; decompTarget = 0; }
+    });
+    cnv.elt.addEventListener('pointerleave', function() {
+      mouseOver = false; decompTarget = 0; isDragging = false;
+    });
+    cnv.elt.addEventListener('pointercancel', function() {
+      mouseOver = false; decompTarget = 0; isDragging = false;
+    });
+    document.addEventListener('keydown', function(e) {
+      if (e.key === 'ArrowRight') pos += ITEM_W;
+      if (e.key === 'ArrowLeft')  pos -= ITEM_W;
+    });
+  };
+
+  sk.draw = function() {
+    if (loaded < N || N === 0) {
+      sk.background(8);
+      sk.fill(240,237,230,80);
+      sk.textSize(12);
+      sk.text('...', W/2-5, H/2);
+      return;
     }
 
-    // Arrow keys for navigation
-    document.addEventListener('keydown', function(e) {
-      if(e.key === 'ArrowLeft')  sh(-1);
-      if(e.key === 'ArrowRight') sh(1);
-    });
+    // Auto-scroll
+    if (!isDragging) {
+      pos += 0.5;
+    }
 
-    outer.addEventListener('pointerdown', function(e) {
-      drag=true; auto=false; ds=e.clientX; ps=pos; clearTimeout(timer);
-      outer.setPointerCapture(e.pointerId);
-    });
-    outer.addEventListener('pointermove', function(e) {
-      if (!drag) return;
-      pos = ps - (e.clientX - ds); cl(); rn();
-    });
-    outer.addEventListener('pointerup', function() {
-      drag=false; timer=setTimeout(function(){auto=true;},2000);
-    });
-    outer.addEventListener('pointercancel', function() {
-      drag=false; timer=setTimeout(function(){auto=true;},2000);
-    });
+    // Wrap position
+    var total = ITEM_W * N;
+    pos = ((pos % total) + total) % total;
 
-    lp();
+    decompAmt += (decompTarget - decompAmt) * 0.12;
+
+    sk.background(8);
+
+    // Draw visible images
+    for (var n = 0; n < N+1; n++) {
+      var idx = n % N;
+      var x   = n * ITEM_W - pos;
+      // Wrap: if offscreen right, also check from start
+      if (x > W || x + ITEM_W < 0) continue;
+
+      var img = imgs[idx];
+      if (!img) continue;
+
+      // Build grain set lazily
+      if (!grainSets[idx]) {
+        grainSets[idx] = buildGrains(img, img.width, img.height);
+      }
+
+      // Draw base image greyscale
+      sk.push();
+      sk.tint(255);
+      sk.image(img, x, 0, ITEM_W, H);
+      sk.pop();
+
+      // Draw grain layer on top
+      if (decompAmt > 0.01) {
+        drawGrains(grainSets[idx], x, img.width, img.height);
+      }
+    }
   };
+
+  function drawGrains(grains, imgX, iW, iH) {
+    var scaleX = ITEM_W / iW;
+    var scaleY = H     / iH;
+    var RX = W * 0.35, RY = H * 0.35, MAX_AMP = 55;
+
+    for (var i=0; i<grains.length; i++) {
+      var g = grains[i];
+      // Screen position of this grain
+      var gsx = imgX + g.ox * scaleX;
+      var gsy = g.oy * scaleY;
+
+      var dx = mouseOver ? Math.abs(mx - gsx) : 9999;
+      var dy = mouseOver ? Math.abs(my - gsy) : 9999;
+      var near = dx < RX && dy < RY;
+
+      if (near || g.amp > 0.5) {
+        g.scroll = (g.scroll + g.speed) % 1;
+        if (near) {
+          var ix = Math.max(0, 1-dx/RX), iy = Math.max(0, 1-dy/RY);
+          g.ampTarget = ix * iy * MAX_AMP * decompAmt;
+        } else {
+          g.ampTarget = 0;
+        }
+        g.amp += (g.ampTarget - g.amp) * 0.18;
+      }
+
+      var wy = (g.amp > 0.5)
+        ? waveVal(g.type, g.t, g.scroll, g.freq, g.phase, g.amp, g.noise)
+        : 0;
+
+      var v = g.bright;
+      sk.fill(v, v, v, 200);
+      sk.circle(gsx, gsy - wy, 2);
+    }
+  }
+
+  sk.windowResized = function() {
+    var wrap = document.getElementById('csOuter');
+    if (!wrap) return;
+    W = wrap.offsetWidth;
+    H = wrap.offsetHeight;
+    ITEM_W = W;
+    sk.resizeCanvas(W, H);
+  };
+
+});
+
 })();
 </script>
 
@@ -975,264 +1099,6 @@ document.addEventListener('mousemove', e => {
 
 <script>
 // ── LANGUAGE SWITCHER ──────────────────────────────────
-// ── PIXEL + LENS EFFECT FOR CAROUSEL SLIDES ─────────────
-(function() {
-
-  function waveVal(type, t, scroll, freq, phase, amp, noise) {
-    const x = (t * freq + scroll) % 1;
-    const a = x * Math.PI * 2 + phase;
-    switch(type) {
-      case 0: return amp * Math.sin(a);
-      case 1: return amp * Math.max(-1, Math.min(1, Math.sin(a) * 3.5));
-      case 2: return amp * (2 * (x % 1) - 1);
-      case 3: {
-        if (!noise) return 0;
-        const pos = ((x + 1) % 1) * (noise.length - 1);
-        const i0  = Math.floor(pos) % noise.length;
-        const i1  = (i0 + 1) % noise.length;
-        return amp * (noise[i0] * (1-(pos%1)) + noise[i1] * (pos%1));
-      }
-      case 4: {
-        const p = ((x%1)+1)%1;
-        return amp * (p < 0.08 ? 1 : p < 0.16 ? -0.3 : 0);
-      }
-    }
-    return 0;
-  }
-
-  function makeNoise(npts) {
-    const freqs  = [1.3, 2.7, 5.1, 8.9];
-    const phases = freqs.map(() => Math.random() * Math.PI * 2);
-    const amps   = [0.45, 0.28, 0.17, 0.10];
-    const arr = [];
-    for (let k = 0; k <= npts; k++) {
-      const t = k / npts;
-      let v = 0;
-      freqs.forEach((f, i) => { v += amps[i] * Math.sin(t * Math.PI * 2 * f + phases[i]); });
-      arr.push(v);
-    }
-    return arr;
-  }
-
-  function initSlideEffect(slide, imgEl) {
-    var W = slide.offsetWidth  || 460;
-    var H = slide.offsetHeight || 500;
-    // Shared state for p5 and lens
-    var mxN = 0.5, myN = 0.5, mouseOver = false, decompTarget = 0;
-    var lmx = W/2, lmy = H/2, lstrTarget = 0;
-
-    // ── LENS CANVAS (z:1, between img and dots) ──────────
-    var lensCanvas = document.createElement('canvas');
-    lensCanvas.width  = W; lensCanvas.height = H;
-    lensCanvas.style.cssText = 'position:absolute;inset:0;z-index:1;pointer-events:none;width:100%;height:100%;';
-    slide.appendChild(lensCanvas);
-    var lctx = lensCanvas.getContext('2d');
-
-    // Prepare greyscale source for lens
-    var src = document.createElement('canvas');
-    src.width = W; src.height = H;
-    var sctx = src.getContext('2d');
-    sctx.filter = 'grayscale(100%) contrast(2.2) brightness(0.75)';
-    sctx.drawImage(imgEl, 0, 0, W, H);
-    sctx.filter = 'none';
-
-    var lstr = 0;
-    var lR = 130, lSTR = 0.55, lframe = 0;
-    var prevX = -999, prevY = -999, prevR = lR+2;
-
-    function lensRender() {
-      lstr += (lstrTarget - lstr) * 0.10;
-      lframe++;
-      if (lframe % 2 !== 0) { requestAnimationFrame(lensRender); return; }
-
-      var r = lR * lstr;
-      if (prevR > 0) lctx.clearRect(prevX-prevR-1, prevY-prevR-1, prevR*2+2, prevR*2+2);
-      if (lstr < 0.02) { prevR = 0; requestAnimationFrame(lensRender); return; }
-
-      var margin = Math.ceil(r * 0.4);
-      var x0 = Math.max(0, Math.floor(lmx-r-margin)), y0 = Math.max(0, Math.floor(lmy-r-margin));
-      var x1 = Math.min(W, Math.ceil(lmx+r+margin)),  y1 = Math.min(H, Math.ceil(lmy+r+margin));
-      var sd = sctx.getImageData(x0, y0, x1-x0, y1-y0);
-
-      var ox0 = Math.max(0,Math.floor(lmx-r)), oy0 = Math.max(0,Math.floor(lmy-r));
-      var ox1 = Math.min(W,Math.ceil(lmx+r)),  oy1 = Math.min(H,Math.ceil(lmy+r));
-      var ow = ox1-ox0, oh = oy1-oy0;
-      if (ow<1||oh<1) { requestAnimationFrame(lensRender); return; }
-
-      var od = lctx.createImageData(ow, oh);
-      for (var oy=0; oy<oh; oy++) {
-        for (var ox=0; ox<ow; ox++) {
-          var wx=ox0+ox-lmx, wy=oy0+oy-lmy;
-          var d=Math.sqrt(wx*wx+wy*wy);
-          if (d>r) continue;
-          var edge=Math.max(0,1-d/r);
-          var s=lSTR*lstr*edge*edge;
-          var nr=d/r;
-          var warp=nr-s*nr*(1-nr);
-          var scale=d>0.5?warp/nr:(1-s);
-          var sx=Math.round(lmx+wx*scale), sy=Math.round(lmy+wy*scale);
-          sx=Math.max(x0,Math.min(x1-1,sx)); sy=Math.max(y0,Math.min(y1-1,sy));
-          var si=((sy-y0)*(x1-x0)+(sx-x0))*4;
-          var di=(oy*ow+ox)*4;
-          if (si>=0&&si+3<sd.data.length) {
-            od.data[di]=sd.data[si]; od.data[di+1]=sd.data[si+1];
-            od.data[di+2]=sd.data[si+2]; od.data[di+3]=Math.round(edge*255);
-          }
-        }
-      }
-      lctx.putImageData(od, ox0, oy0);
-      prevX=lmx; prevY=lmy; prevR=Math.ceil(r)+1;
-      requestAnimationFrame(lensRender);
-    }
-    lensRender();
-
-    // ── P5 DOT SKETCH (z:2) ──────────────────────────────
-    var p5wrap = document.createElement('div');
-    p5wrap.style.cssText = 'position:absolute;inset:0;z-index:2;pointer-events:none;';
-    slide.appendChild(p5wrap);
-
-    new p5(function(sk) {
-      var grains = [], built = false;
-      var mouseOver = false, mxN = 0.5, myN = 0.5;
-      var decompAmt = 0, decompTarget = 0;
-      var GRAIN = 8;
-
-      function buildGrains() {
-        var tmp = document.createElement('canvas');
-        tmp.width = W; tmp.height = H;
-        var ctx = tmp.getContext('2d');
-        ctx.drawImage(imgEl, 0, 0, W, H);
-        var pix = ctx.getImageData(0, 0, W, H).data;
-        grains = [];
-        var si = 0;
-        for (var j=0; j<H; j+=GRAIN) {
-          for (var i=0; i<W; i+=GRAIN) {
-            var pidx=(j*W+i)*4;
-            var bv=(0.299*pix[pidx]+0.587*pix[pidx+1]+0.114*pix[pidx+2])/255;
-            var bright=Math.round(Math.pow(bv,0.78)*255);
-            var type=si%5, t=i/W;
-            grains.push({
-              ox:i-W/2, oy:j-H/2, bright, type, t,
-              freq:0.6+t*3.5, phase:Math.random()*Math.PI*2,
-              scroll:Math.random(), speed:0.002+Math.random()*0.003,
-              noise:(type===3)?makeNoise(120):null,
-              amp:0, ampTarget:0,
-              rx:0, rxTarget:0, ry:0, ryTarget:0,
-              rxDir:Math.random()>0.5?1:-1, ryDir:Math.random()>0.5?1:-1
-            });
-            si++;
-          }
-        }
-        built = true;
-      }
-
-      sk.setup = function() {
-        var cnv = sk.createCanvas(W, H, sk.WEBGL);
-        cnv.elt.style.cssText = 'position:absolute!important;inset:0;width:100%!important;height:100%!important;';
-        p5wrap.appendChild(cnv.elt);
-        sk.pixelDensity(1);
-        sk.frameRate(18);
-        sk.noStroke();
-        if (imgEl.complete) buildGrains(); else imgEl.onload = buildGrains;
-      };
-
-      sk.draw = function() {
-        if (!built) return;
-        sk.clear();
-        sk.ortho(-W/2, W/2, -H/2, H/2, -1000, 1000);
-
-        decompAmt += (decompTarget-decompAmt)*0.14;
-
-        var RX=W*0.40, RY=H*0.40, MAX_AMP=65, MAX_TILT=0.5;
-        var mxW=(mxN-0.5)*W, myW=(myN-0.5)*H;
-
-        for (var i=0; i<grains.length; i++) {
-          var g=grains[i];
-          var dx=mouseOver?Math.abs(mxW-g.ox):9999;
-          var dy=mouseOver?Math.abs(myW-g.oy):9999;
-          var near=(dx<RX&&dy<RY);
-
-          if (near||g.amp>0.5||Math.abs(g.rx)>0.02||Math.abs(g.ry)>0.02) {
-            g.scroll=(g.scroll+g.speed)%1;
-            if (near) {
-              var ix=Math.max(0,1-dx/RX), iy=Math.max(0,1-dy/RY);
-              var inf=ix*iy;
-              g.ampTarget=inf*MAX_AMP*decompAmt;
-              var signX=(myW>g.oy)?1:-1, signY=(mxW>g.ox)?1:-1;
-              g.rxTarget=signX*inf*MAX_TILT*decompAmt;
-              g.ryTarget=signY*inf*MAX_TILT*decompAmt;
-            } else {
-              g.ampTarget=0; g.rxTarget=0; g.ryTarget=0;
-            }
-            g.amp+=(g.ampTarget-g.amp)*0.18;
-            g.rx+=(g.rxTarget-g.rx)*0.15;
-            g.ry+=(g.ryTarget-g.ry)*0.15;
-          } else {
-            g.rx*=0.92; g.ry*=0.92;
-          }
-
-          var wy=(g.amp>0.5)?waveVal(g.type,g.t,g.scroll,g.freq,g.phase,g.amp,g.noise):0;
-          var v=g.bright;
-          sk.fill(v,v,v,200);
-          sk.push();
-          sk.translate(g.ox,g.oy-wy);
-          if (Math.abs(g.rx)>0.02||Math.abs(g.ry)>0.02) { sk.rotateX(g.rx); sk.rotateY(g.ry); }
-          sk.circle(0,0,2);
-          sk.pop();
-        }
-      };
-    }); // end p5
-
-    // ── SHARED POINTER EVENTS ────────────────────────────
-    slide.style.touchAction = 'none';
-    function onMove(e) {
-      var r = slide.getBoundingClientRect();
-      var nx = (e.clientX-r.left)/r.width;
-      var ny = (e.clientY-r.top)/r.height;
-      // update p5
-      mxN = nx; myN = ny; mouseOver = true; decompTarget = 1;
-      // update lens
-      lmx = nx*W; lmy = ny*H; lstrTarget = 1;
-    }
-    function onEnd(e) {
-      if (!e || e.pointerType === 'touch' || e.type === 'pointerleave') {
-        mouseOver = false; decompTarget = 0; lstrTarget = 0;
-      }
-    }
-    slide.addEventListener('pointermove', onMove);
-    slide.addEventListener('pointerdown', function(e) { slide.setPointerCapture(e.pointerId); onMove(e); });
-    slide.addEventListener('pointerleave', onEnd);
-    slide.addEventListener('pointerup',    function(e) { if (e.pointerType==='touch') onEnd(e); });
-    slide.addEventListener('pointercancel', onEnd);
-
-  }
-
-  // Wait for slides to be built by buildCarousel, then init effects
-  // Override buildCarousel to hook in after it runs
-  var _origBuild = window.buildCarousel;
-  document.addEventListener('DOMContentLoaded', function() {
-    // Poll until slides exist
-    var attempts = 0;
-    var poll = setInterval(function() {
-      attempts++;
-      var slides = document.querySelectorAll('.cs-item[id]'); // original slides (not dupes)
-      if (slides.length >= 1 || attempts > 40) {
-        clearInterval(poll);
-        slides.forEach(function(slide) {
-          var fb = slide.querySelector('.fallback');
-          if (!fb) return;
-          if (fb.complete && fb.naturalWidth > 0) {
-            initSlideEffect(slide, fb);
-          } else {
-            fb.addEventListener('load', function() { initSlideEffect(slide, fb); }, {once:true});
-          }
-        });
-      }
-    }, 150);
-  });
-
-})();
-
 function setLang(lang) {
   document.getElementById('btn-pt').classList.toggle('active', lang === 'pt');
   document.getElementById('btn-en').classList.toggle('active', lang === 'en');
