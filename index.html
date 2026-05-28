@@ -466,8 +466,7 @@ uniform float uTrailAge[48];
 
 varying float vBright;
 varying float vAlpha;
-varying vec2  vTexUV;
-varying float vInf;
+
 
 float hash(float n){ return fract(sin(n)*43758.5453); }
 
@@ -545,27 +544,17 @@ void main(){
   vBright = aBright;
   vAlpha  = 0.85 + clamp(trailInf*0.1, 0.0, 0.15);
   // Pass normalised original position for texture sampling in frag
-  vTexUV = aPos / uRes;
-  vInf   = inf + clamp(trailInf*0.3, 0.0, 1.0);
+
 }`;
 
   const FRAG = `
 precision mediump float;
-uniform sampler2D uImgTex;
 varying float vBright;
 varying float vAlpha;
-varying vec2  vTexUV;
-varying float vInf;
 void main(){
   vec2 c = gl_PointCoord-0.5;
   if(dot(c,c)>0.25) discard;
-  // Sample image at original grain position (flip Y for GL)
-  vec3 imgCol  = texture2D(uImgTex, vec2(vTexUV.x, 1.0-vTexUV.y)).rgb;
-  float imgGrey = dot(imgCol, vec3(0.299,0.587,0.114));
-  // Inside influence zone: use image color so cursor circle is invisible
-  float blend  = clamp(vInf*1.5, 0.0, 1.0);
-  float bright = mix(vBright, imgGrey, blend);
-  gl_FragColor = vec4(vec3(bright), vAlpha);
+  gl_FragColor = vec4(vec3(vBright), vAlpha);
 }`;
 
   function mkShader(type,src){
@@ -590,22 +579,7 @@ void main(){
   const uTime   =gl.getUniformLocation(prog,'uTime');
   const uTrailPos=gl.getUniformLocation(prog,'uTrailPos[0]');
   const uTrailAge=gl.getUniformLocation(prog,'uTrailAge[0]');
-  const uImgTex =gl.getUniformLocation(prog,'uImgTex');
 
-  // Create texture for image color sampling
-  const imgTex = gl.createTexture();
-  gl.bindTexture(gl.TEXTURE_2D, imgTex);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-  // Upload 1x1 placeholder
-  gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,1,1,0,gl.RGBA,gl.UNSIGNED_BYTE,new Uint8Array([128,128,128,255]));
-
-  function uploadImgTexture(img){
-    gl.bindTexture(gl.TEXTURE_2D, imgTex);
-    gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,gl.RGBA,gl.UNSIGNED_BYTE,img);
-  }
 
   const GRAIN=2;
   let imgBuf=null, imgN=0;
@@ -688,7 +662,6 @@ void main(){
 
   function rebuildAll(){
     buildGrains(bgImg);
-    uploadImgTexture(bgImg);
   }
   bgImg.addEventListener('load', rebuildAll);
   if(bgImg.complete&&bgImg.naturalWidth>0) rebuildAll();
@@ -716,9 +689,6 @@ void main(){
     for(let i=0;i<TRAIL_LEN;i++){trailFlat[i*2]=trailX[i];trailFlat[i*2+1]=trailY[i];}
     gl.uniform2fv(uTrailPos, trailFlat);
     gl.uniform1fv(uTrailAge, trailAge);
-    gl.activeTexture(gl.TEXTURE0);
-    gl.bindTexture(gl.TEXTURE_2D,imgTex);
-    gl.uniform1i(uImgTex,0);
     gl.uniform2f(uRes,W,H);
     gl.uniform2f(uMouse,mx,my);
     gl.uniform1f(uWarp,warpAmt);
@@ -1087,8 +1057,7 @@ uniform vec2  uTrailPos[48];
 uniform float uTrailAge[48];
 varying float vBright;
 varying float vAlpha;
-varying vec2  vTexUV;
-varying float vInf;
+
 
 float waveVal(float type,float t,float scroll,float freq,float phase,float amp){
   float x=mod(t*freq+scroll,1.0), a=x*6.2832+phase;
