@@ -19,7 +19,7 @@
 <!-- Open Graph / Facebook / WhatsApp -->
 <meta property="og:type" content="website">
 <meta property="og:url" content="https://dami1.github.io/andredamiao/">
-<meta property="og:title" content="AD">
+<meta property="og:title" content="André Damião — Artista Sonoro">
 <meta property="og:description" content="Artista sonoro brasileiro. Composição eletrônica experimental, arte sonora, software art, hardware hacking e instalação sonora.">
 <meta property="og:image" content="https://dami1.github.io/andredamiao/imagens/imagemweb2.jpg">
 <meta property="og:image:alt" content="André Damião — performance sonora">
@@ -165,8 +165,8 @@ a:visited{color:var(--fg);}
   margin-bottom:0;
 }
 .cs-outer:active{cursor:grabbing;}
-.cs-track{display:flex;height:100%;gap:2px;will-change:transform;user-select:none;}
-.cs-item{flex:0 0 460px;height:100%;min-height:400px;position:relative;overflow:hidden;}
+
+
 
 /* p5 renders INTO this canvas replacing the img */
 .cs-item canvas{
@@ -175,18 +175,10 @@ a:visited{color:var(--fg);}
   display:block;
 }
 /* fallback img hidden once canvas is ready */
-.cs-item img.fallback{
-  position:absolute;inset:0;
-  width:100%;height:100%;
-  object-fit:cover;
-  display:block;
-  filter:grayscale(100%);
-  z-index:0;
-}
+.cs-item img
 
-.cs-cap{
-  position:absolute;bottom:0;left:0;right:0;
-  background:rgba(0,0,0,0.85);color:var(--fg);
+/* .cs-cap removed */
+  /*.cs-cap {  background:rgba(0,0,0,0.85);color:var(--fg);
   padding:5px 10px;font-size:10px;
   letter-spacing:0.1em;text-transform:uppercase;
   opacity:0;transition:opacity 0.2s;z-index:4;
@@ -403,32 +395,22 @@ canvas, img, svg, rect {
 <script src="https://cdn.jsdelivr.net/npm/p5@1.9.0/lib/p5.min.js"></script>
 
 <script>
-// ── SINGLE P5 CAROUSEL ───────────────────────────────────
-// One sketch handles: image loading, scrolling, pixel effect, lens
-(function() {
-
+// ── P5 CAROUSEL ──────────────────────────────────────────
 new p5(function(sk) {
-  var imgs = [];       // loaded p5 images
-  var imgFiles = [];   // filenames from JSON
+  var imgs = [], N = 0, loaded = 0;
   var captions = [];
-  var N = 0;
-  var loaded = 0;
+  var W, H, ITEM_W;
+  var pos = 0;
+  var isDragging = false, dragStartX = 0, dragPosStart = 0;
 
-  var W, H;
-  var pos = 0;         // scroll position in px
-  var vel = 0;         // momentum
-  var dragStart = null, dragPos = 0;
-  var isDragging = false;
-  var ITEM_W;
-
-  // Mouse state for pixel effect
-  var mx = 0, my = 0;
-  var mouseOver = false;
+  // Pixel effect state
+  var mx = 0.5, my = 0.5; // normalised 0-1
+  var hover = false;
   var decompAmt = 0, decompTarget = 0;
 
-  // Per-image grain arrays (built once per image)
-  var grainSets = [];
-  var GRAIN = 8;
+  // Per-image grain arrays — built once
+  var grainSets = {};
+  var GRAIN = 10; // coarser = faster
 
   function waveVal(type, t, scroll, freq, phase, amp, noise) {
     const x = (t * freq + scroll) % 1;
@@ -466,112 +448,98 @@ new p5(function(sk) {
     return arr;
   }
 
-  function buildGrains(p5img, iW, iH) {
-    p5img.loadPixels();
-    var grains = [];
-    var si = 0;
-    for (var j = 0; j < iH; j += GRAIN) {
-      for (var i = 0; i < iW; i += GRAIN) {
-        var idx = (j * iW + i) * 4;
-        var r = p5img.pixels[idx], g = p5img.pixels[idx+1], b = p5img.pixels[idx+2];
-        var bv = (0.299*r + 0.587*g + 0.114*b) / 255;
-        var bright = Math.round(Math.pow(bv, 0.78) * 255);
-        var type = si%5, t = i/iW;
-        grains.push({
-          ox: i, oy: j, bright, type, t,
-          freq: 0.6+t*3.5, phase: Math.random()*Math.PI*2,
-          scroll: Math.random(), speed: 0.002+Math.random()*0.003,
-          noise: (type===3)?makeNoise(120):null,
-          amp:0, ampTarget:0
-        });
-        si++;
-      }
-    }
-    return grains;
-  }
-
   sk.preload = function() {
     sk.loadJSON('imagens/imagens.json?v=' + Date.now(), function(data) {
-      imgFiles = data.map(function(d) { return d.arquivo; });
       captions = data;
-      N = imgFiles.length;
-      imgFiles.forEach(function(f, i) {
-        sk.loadImage('imagens/' + f, function(img) {
-          imgs[i] = img;
-          loaded++;
-        });
+      N = data.length;
+      data.forEach(function(d, i) {
+        sk.loadImage('imagens/' + d.arquivo,
+          function(img) { imgs[i] = img; loaded++; },
+          function()    { loaded++; console.warn('failed:', d.arquivo); }
+        );
       });
     });
   };
 
   sk.setup = function() {
     var wrap = document.getElementById('csOuter');
-    W = wrap.offsetWidth  || window.innerWidth;
-    H = wrap.offsetHeight || window.innerHeight - 200;
-    ITEM_W = W;  // each image fills full width
-
+    W = wrap.offsetWidth;
+    H = wrap.offsetHeight || Math.round(window.innerHeight * 0.65);
+    ITEM_W = W;
     var cnv = sk.createCanvas(W, H);
     cnv.parent('csOuter');
-    cnv.elt.style.display = 'block';
+    cnv.elt.style.cssText = 'display:block;position:absolute;inset:0;';
     sk.pixelDensity(1);
     sk.frameRate(20);
-    sk.imageMode(sk.CORNER);
     sk.noStroke();
 
-    // Build grains for each image once loaded
-    // Done lazily in draw() when image first encountered
-
-    // Pointer events on the canvas
     cnv.elt.style.touchAction = 'none';
+
     cnv.elt.addEventListener('pointermove', function(e) {
       var r = cnv.elt.getBoundingClientRect();
-      mx = e.clientX - r.left;
-      my = e.clientY - r.top;
-      mouseOver = true; decompTarget = 1;
-      if (isDragging) {
-        var dx = e.clientX - dragStart;
-        pos = dragPos - dx;
-      }
+      mx = (e.clientX - r.left) / r.width;
+      my = (e.clientY - r.top)  / r.height;
+      hover = true; decompTarget = 1;
+      if (isDragging) pos = dragPosStart + (dragStartX - e.clientX);
     });
     cnv.elt.addEventListener('pointerdown', function(e) {
       cnv.elt.setPointerCapture(e.pointerId);
-      dragStart = e.clientX;
-      dragPos   = pos;
-      isDragging = true;
-      vel = 0;
-      mouseOver = true; decompTarget = 1;
+      isDragging = true; dragStartX = e.clientX; dragPosStart = pos;
+      hover = true; decompTarget = 1;
     });
     cnv.elt.addEventListener('pointerup', function(e) {
       isDragging = false;
-      if (e.pointerType === 'touch') { mouseOver = false; decompTarget = 0; }
+      if (e.pointerType === 'touch') { hover = false; decompTarget = 0; }
     });
-    cnv.elt.addEventListener('pointerleave', function() {
-      mouseOver = false; decompTarget = 0; isDragging = false;
-    });
-    cnv.elt.addEventListener('pointercancel', function() {
-      mouseOver = false; decompTarget = 0; isDragging = false;
-    });
+    cnv.elt.addEventListener('pointerleave',  function() { isDragging = false; hover = false; decompTarget = 0; });
+    cnv.elt.addEventListener('pointercancel', function() { isDragging = false; hover = false; decompTarget = 0; });
     document.addEventListener('keydown', function(e) {
       if (e.key === 'ArrowRight') pos += ITEM_W;
       if (e.key === 'ArrowLeft')  pos -= ITEM_W;
     });
   };
 
+  function buildGrains(idx) {
+    var img = imgs[idx];
+    if (!img) return [];
+    var g = [], si = 0;
+    // Sample at grain spacing, mapped to canvas size
+    var cols = Math.floor(W / GRAIN);
+    var rows = Math.floor(H / GRAIN);
+    for (var j = 0; j < rows; j++) {
+      for (var i = 0; i < cols; i++) {
+        // Sample pixel from source image
+        var sx = Math.round(i / cols * img.width);
+        var sy = Math.round(j / rows * img.height);
+        var c  = img.get(sx, sy);
+        var bv = (sk.red(c)*0.299 + sk.green(c)*0.587 + sk.blue(c)*0.114) / 255;
+        var bright = Math.round(Math.pow(bv, 0.78) * 255);
+        var type = si % 5, t = i / cols;
+        g.push({
+          // canvas coords (not centred)
+          cx: i * GRAIN, cy: j * GRAIN,
+          bright, type, t,
+          freq: 0.6 + t*3.5,
+          phase: Math.random()*Math.PI*2,
+          scroll: Math.random(),
+          speed: 0.002 + Math.random()*0.003,
+          noise: (type===3)?makeNoise(80):null,
+          amp:0, ampTarget:0
+        });
+        si++;
+      }
+    }
+    return g;
+  }
+
   sk.draw = function() {
     if (loaded < N || N === 0) {
       sk.background(8);
-      sk.fill(240,237,230,80);
-      sk.textSize(12);
-      sk.text('...', W/2-5, H/2);
       return;
     }
 
     // Auto-scroll
-    if (!isDragging) {
-      pos += 0.5;
-    }
-
-    // Wrap position
+    if (!isDragging) pos += 0.4;
     var total = ITEM_W * N;
     pos = ((pos % total) + total) % total;
 
@@ -579,67 +547,57 @@ new p5(function(sk) {
 
     sk.background(8);
 
-    // Draw visible images
-    for (var n = 0; n < N+1; n++) {
-      var idx = n % N;
-      var x   = n * ITEM_W - pos;
-      // Wrap: if offscreen right, also check from start
-      if (x > W || x + ITEM_W < 0) continue;
+    // Draw each visible image
+    for (var n = 0; n < N + 1; n++) {
+      var imgIdx = n % N;
+      var imgX   = n * ITEM_W - pos;
+      if (imgX + ITEM_W < 0 || imgX > W) continue;
 
-      var img = imgs[idx];
+      var img = imgs[imgIdx];
       if (!img) continue;
 
-      // Build grain set lazily
-      if (!grainSets[idx]) {
-        grainSets[idx] = buildGrains(img, img.width, img.height);
-      }
-
-      // Draw base image greyscale
+      // Base image — greyscale via tint trick
       sk.push();
       sk.tint(255);
-      sk.image(img, x, 0, ITEM_W, H);
+      sk.image(img, imgX, 0, ITEM_W, H);
       sk.pop();
 
-      // Draw grain layer on top
+      // Pixel layer — only draw if hovering
       if (decompAmt > 0.01) {
-        drawGrains(grainSets[idx], x, img.width, img.height);
+        // Build grains lazily
+        if (!grainSets[imgIdx]) grainSets[imgIdx] = buildGrains(imgIdx);
+        drawGrains(grainSets[imgIdx], imgX);
       }
     }
   };
 
-  function drawGrains(grains, imgX, iW, iH) {
-    var scaleX = ITEM_W / iW;
-    var scaleY = H     / iH;
-    var RX = W * 0.35, RY = H * 0.35, MAX_AMP = 55;
+  function drawGrains(grains, imgX) {
+    var RX = W * 0.35 * decompAmt;
+    var RY = H * 0.35 * decompAmt;
+    var MAX_AMP = 55;
+    var mxPx = mx * W, myPx = my * H;
 
-    for (var i=0; i<grains.length; i++) {
+    for (var i = 0; i < grains.length; i++) {
       var g = grains[i];
-      // Screen position of this grain
-      var gsx = imgX + g.ox * scaleX;
-      var gsy = g.oy * scaleY;
+      var gx = imgX + g.cx;
+      var gy = g.cy;
 
-      var dx = mouseOver ? Math.abs(mx - gsx) : 9999;
-      var dy = mouseOver ? Math.abs(my - gsy) : 9999;
+      var dx = hover ? Math.abs(mxPx - gx) : 9999;
+      var dy = hover ? Math.abs(myPx - gy) : 9999;
       var near = dx < RX && dy < RY;
 
-      if (near || g.amp > 0.5) {
+      if (near || g.amp > 0.3) {
         g.scroll = (g.scroll + g.speed) % 1;
-        if (near) {
-          var ix = Math.max(0, 1-dx/RX), iy = Math.max(0, 1-dy/RY);
-          g.ampTarget = ix * iy * MAX_AMP * decompAmt;
-        } else {
-          g.ampTarget = 0;
-        }
+        g.ampTarget = near ? (1-dx/RX)*(1-dy/RY)*MAX_AMP : 0;
         g.amp += (g.ampTarget - g.amp) * 0.18;
       }
 
-      var wy = (g.amp > 0.5)
-        ? waveVal(g.type, g.t, g.scroll, g.freq, g.phase, g.amp, g.noise)
-        : 0;
+      if (g.amp < 0.3 && !near) continue; // skip draw if flat
 
-      var v = g.bright;
-      sk.fill(v, v, v, 200);
-      sk.circle(gsx, gsy - wy, 2);
+      var wy = waveVal(g.type, g.t, g.scroll, g.freq, g.phase, g.amp, g.noise);
+      var v  = g.bright;
+      sk.fill(v, v, v, 210);
+      sk.circle(gx, gy - wy, 2);
     }
   }
 
@@ -650,11 +608,9 @@ new p5(function(sk) {
     H = wrap.offsetHeight;
     ITEM_W = W;
     sk.resizeCanvas(W, H);
+    grainSets = {}; // rebuild on resize
   };
-
 });
-
-})();
 </script>
 
 <script>
