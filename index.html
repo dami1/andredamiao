@@ -102,7 +102,7 @@ a:visited{color:var(--fg);}
 /* HEADER */
 .site-header{
   border-bottom:2px solid var(--fg);
-  padding:44px 0 20px;
+  padding:18px 0 12px;
   position:relative;
 }
 /* p5 canvas for title glitch sits behind text */
@@ -132,7 +132,7 @@ a:visited{color:var(--fg);}
 
 /* NAV */
 .nav{
-  padding:11px 0;border-bottom:1px solid var(--lt);
+  padding:6px 0;border-bottom:1px solid var(--lt);
   font-size:12.5px;letter-spacing:0.04em;
   display:flex;align-items:center;flex-wrap:wrap;gap:0;
 }
@@ -386,9 +386,9 @@ canvas, img, svg, rect {
   <button class="lang-btn" id="btn-en" onclick="setLang('en')">EN</button>
 </nav>
 
-<div class="sono-wrap" id="sono1" style="height:50px;margin-top:28px;"></div>
+<div class="sono-wrap" id="sono1" style="height:40px;margin-top:10px;"></div>
 
-<div id="csOuter" style="flex:1;min-height:400px;border-top:2px solid var(--fg);position:relative;overflow:hidden;"></div>
+<div id="csOuter" style="flex:1;min-height:0;border-top:2px solid var(--fg);position:relative;overflow:hidden;"></div>
 
 </div>
 
@@ -672,9 +672,11 @@ new p5(function(sk) {
   };
 
   function drawGrains(grains, imgX) {
-    var RX=W*0.38*Math.max(0.15,warpAmt+0.15);
-    var RY=H*0.38*Math.max(0.15,warpAmt+0.15);
-    var MAX_AMP=55*Math.max(0.1,warpAmt);
+    // Dots always visible: base radius even without hover
+    var baseRad = 0.12;
+    var RX=W*(baseRad + 0.30*warpAmt);
+    var RY=H*(baseRad + 0.30*warpAmt);
+    var MAX_AMP=4 + 55*warpAmt;  // small base movement always
     var MAX_TILT=0.45*warpAmt;
 
     for(var i=0;i<grains.length;i++){
@@ -694,25 +696,24 @@ new p5(function(sk) {
         if(near){
           var ix=Math.max(0,1-dx/RX), iy=Math.max(0,1-dy/RY);
           var inf=ix*iy;
-          g.ampTarget=inf*MAX_AMP;
+          g.ampTarget=inf*MAX_AMP + 1.5;  // base amp so dots always move a little
           g.rxTarget=(myPx>gy?1:-1)*inf*MAX_TILT;
           g.ryTarget=(mxPx>gx?1:-1)*inf*MAX_TILT;
         } else {
-          g.ampTarget=0;g.rxTarget=0;g.ryTarget=0;
+          g.ampTarget=1.2;g.rxTarget=0;g.ryTarget=0;  // small base movement
         }
         g.amp+=(g.ampTarget-g.amp)*0.18;
         g.rx+=(g.rxTarget-g.rx)*0.15;
         g.ry+=(g.ryTarget-g.ry)*0.15;
       } else {
         g.rx*=0.9;g.ry*=0.9;
+        g.ampTarget=1.2;  // always some movement
+        g.amp+=(g.ampTarget-g.amp)*0.05;
       }
 
       var wy=waveVal(g.type,g.t,g.scroll,g.freq,g.phase,g.amp,g.noise);
       var v=g.bright;
-
-      // tilt: offset x slightly by ry (left-right tilt)
       var tx=gx+g.ry*18;
-
       sk.noStroke();
       sk.fill(v,v,v,210);
       sk.circle(tx, gy-wy, 2);
@@ -835,12 +836,12 @@ new p5(function(sk) {
     const header = document.getElementById('siteHeader');
     const nameEl = document.getElementById('sname');
     W = header.offsetWidth || 800;
-    const fs = Math.min(92, Math.max(28, W * 0.09));
-    H = Math.round(fs * 1.5); // extra headroom for descenders
+    const fs = Math.min(72, Math.max(20, W * 0.07));
+    H = Math.round(fs * 1.4);
 
     let cnv = sk.createCanvas(W, H);
     cnv.elt.id = 'title-canvas';
-    cnv.elt.style.cssText = 'position:absolute;top:32px;left:0;pointer-events:none;z-index:3;';
+    cnv.elt.style.cssText = 'position:absolute;top:18px;left:0;pointer-events:none;z-index:3;';
     header.insertBefore(cnv.elt, header.firstChild);
     nameEl.style.visibility = 'hidden';
 
@@ -932,7 +933,7 @@ new p5(function(sk) {
     const header = document.getElementById('siteHeader');
     if (!header) return;
     W = header.offsetWidth;
-    const newFs = Math.min(92, Math.max(22, W * 0.09));
+    const newFs = Math.min(72, Math.max(20, W * 0.07));
     const newH  = Math.round(newFs * 1.5);
     sk.resizeCanvas(W, newH);
     // Clear and re-sample at new resolution
