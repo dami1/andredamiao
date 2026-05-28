@@ -391,19 +391,15 @@ canvas, img, svg, rect {
 <script src="https://cdn.jsdelivr.net/npm/p5@1.9.0/lib/p5.min.js"></script>
 
 <script>
-// ── WEBGL: image dots + title text + mouse trail ────────
+// ── WEBGL: permanent distortion shader ─────────────────
 (function(){
   const IMAGES = [
-    'imagens/imagemweb2.jpg',
-    'imagens/narva2_perf.jpg',
-    'imagens/NarvaparaImpressao.jpg',
-    'imagens/DTS4699mam-foto-WEB.JPG',
-    'imagens/cloro1.jpg',
-    'imagens/contraquem3.jpg'
+    'imagens/imagemweb2.jpg','imagens/narva2_perf.jpg',
+    'imagens/NarvaparaImpressao.jpg','imagens/DTS4699mam-foto-WEB.JPG',
+    'imagens/cloro1.jpg','imagens/contraquem3.jpg'
   ];
-  const chosen = IMAGES[Math.floor(Math.random()*IMAGES.length)];
-  const bgImg  = document.getElementById('bg-img');
-  bgImg.src    = chosen;
+  const bgImg = document.getElementById('bg-img');
+  bgImg.src   = IMAGES[Math.floor(Math.random()*IMAGES.length)];
 
   const wrap    = document.getElementById('csOuter');
   const glCnv   = document.getElementById('gl-canvas');
@@ -411,150 +407,65 @@ canvas, img, svg, rect {
   let W, H;
 
   function resize(){
-    W = wrap.offsetWidth;
-    H = wrap.offsetHeight;
-    glCnv.width   = W; glCnv.height   = H;
-    lensCnv.width = W; lensCnv.height = H;
+    W = wrap.offsetWidth; H = wrap.offsetHeight;
+    glCnv.width=W; glCnv.height=H;
+    lensCnv.width=W; lensCnv.height=H;
   }
   resize();
-  window.addEventListener('resize', function(){
-    resize(); srcReady=false;
-    if(bgImg.complete&&bgImg.naturalWidth>0){ rebuildAll(); }
-  });
+  window.addEventListener('resize',function(){ resize(); if(ready) rebuildAll(); });
   window.addEventListener('orientationchange',function(){
-    setTimeout(function(){ resize(); if(bgImg.complete&&bgImg.naturalWidth>0) rebuildAll(); },200);
+    setTimeout(function(){ resize(); if(ready) rebuildAll(); },200);
   });
 
-  // ── WebGL ────────────────────────────────────────────────
   const gl = glCnv.getContext('webgl',{alpha:true,premultipliedAlpha:false,antialias:false})
           || glCnv.getContext('experimental-webgl',{alpha:true,premultipliedAlpha:false});
   if(!gl){ console.error('no webgl'); return; }
 
-  // ── Trail: circular buffer of last N mouse positions + age ──
-  const TRAIL_LEN = 48;
-  const trailX  = new Float32Array(TRAIL_LEN);
-  const trailY  = new Float32Array(TRAIL_LEN);
-  const trailAge= new Float32Array(TRAIL_LEN); // 0=new, 1=max age
-  let   trailHead = 0;
-
-  function pushTrail(x, y){
-    trailX[trailHead]   = x;
-    trailY[trailHead]   = y;
-    trailAge[trailHead] = 0.0;
-    trailHead = (trailHead + 1) % TRAIL_LEN;
-  }
-  function ageTrail(){
-    for(let i=0;i<TRAIL_LEN;i++) trailAge[i] = Math.min(1.0, trailAge[i]+0.012);
-  }
-
   // ── Shaders ──────────────────────────────────────────────
+  // Simple: just draw points at positions stored in buffer.
+  // All distortion is done in JS — positions are permanently updated.
   const VERT = `
 precision mediump float;
-attribute vec2  aPos;
-attribute float aType;
-attribute float aPhase;
+attribute vec2  aPos;     // current (possibly displaced) position
+attribute float aPhase;   // for gentle ambient wave
 attribute float aScroll;
 attribute float aBright;
-
+attribute float aType;
 uniform vec2  uRes;
-uniform vec2  uMouse;
-uniform float uWarp;
 uniform float uTime;
-// Trail uniforms
-uniform vec2  uTrailPos[48];
-uniform float uTrailAge[48];
-
 varying float vBright;
 varying float vAlpha;
 
-
-float hash(float n){ return fract(sin(n)*43758.5453); }
-
-float waveVal(float type, float t, float scroll, float freq, float phase, float amp){
-  float x = mod(t*freq+scroll,1.0);
-  float a = x*6.2832+phase;
+float waveVal(float type,float t,float scroll,float freq,float phase,float amp){
+  float x=mod(t*freq+scroll,1.0), a=x*6.2832+phase;
   if(type<1.0) return amp*sin(a);
   if(type<2.0) return amp*clamp(sin(a)*4.0,-1.,1.);
-  if(type<3.0){
-    float saw=2.0*mod(x,1.0)-1.0;
-    return amp*(saw*0.7+sin(a*0.5)*0.3);
-  }
-  if(type<4.0){
-    float n=sin(x*31.7+phase)*0.5+sin(x*17.3+phase*1.3)*0.3+sin(x*53.1+phase*0.7)*0.2;
-    return amp*n;
-  }
-  float p=mod(x+1.0,1.0);
-  return amp*exp(-p*12.0)*sin(p*40.0+phase);
+  if(type<3.0){float s=2.0*mod(x,1.0)-1.0;return amp*(s*0.7+sin(a*0.5)*0.3);}
+  if(type<4.0){return amp*(sin(x*31.7+phase)*0.5+sin(x*17.3+phase*1.3)*0.3+sin(x*53.1+phase*0.7)*0.2);}
+  float p=mod(x+1.0,1.0);return amp*exp(-p*12.0)*sin(p*40.0+phase);
 }
 
 void main(){
-  float scroll = mod(aScroll + uTime*0.002, 1.0);
-  float t      = aPos.x / uRes.x;
-  float freq   = 0.6 + t*3.5;
-
-  // ── Current mouse influence ──
-  vec2  delta  = aPos - uMouse;
-  vec2  dAsp   = delta * vec2(1.0, uRes.x/uRes.y);
-  float dist   = length(dAsp);
-  float radius = uRes.x*(0.07+0.13*uWarp);
-  float inf    = clamp(1.0-dist/radius, 0.0, 1.0);
-  inf = inf*inf*(3.0-2.0*inf); inf=inf*inf;
-
-  // ── Trail influence — accumulates distortion ──
-  float trailInf = 0.0;
-  vec2  trailDir = vec2(0.0);
-  for(int i=0;i<48;i++){
-    vec2  td    = aPos - uTrailPos[i];
-    float td2   = length(td * vec2(1.0, uRes.x/uRes.y));
-    float age   = uTrailAge[i];
-    float tr    = uRes.x * (0.04 + 0.08*(1.0-age));  // radius shrinks with age
-    float ti    = clamp(1.0-td2/max(tr,0.001), 0.0, 1.0);
-    ti = ti*ti;
-    // Older trail = more distortion (accumulated)
-    float distortionScale = 0.5 + age*1.5;
-    trailInf += ti * distortionScale * (1.0-age*0.6);
-    if(td2<tr) trailDir += normalize(td+vec2(0.001))*ti*distortionScale;
-  }
-  trailInf = clamp(trailInf, 0.0, 3.0);
-
-  // ── Wave displacement ──
-  float amp  = 1.5 + 65.0*inf*uWarp + trailInf*8.0;
-  float wy   = waveVal(aType, t, scroll, freq, aPhase, amp);
-  float typeX= mod(aType+2.0,5.0);
-  float wx   = waveVal(typeX, 1.0-t, scroll*0.7+0.3, 0.4+(1.0-t)*2.8, aPhase+1.57, amp*0.35);
-
-  // ── Lens push from current mouse ──
-  float lensR   = uRes.x*0.09*uWarp;
-  float lensInf = clamp(1.0-dist/max(lensR,0.001),0.0,1.0);
-  lensInf = lensInf*lensInf;
-  vec2 lensShift = -delta*lensInf*0.25*uWarp;
-
-  // ── Trail scatter: push grains along trail direction ──
-  vec2 trailShift = normalize(trailDir+vec2(0.001))*trailInf*4.0;
-
-  float tiltX = sign(delta.y)*inf*12.0*uWarp;
-  float tiltY = sign(delta.x)*inf*8.0*uWarp;
-
-  vec2 p = aPos + vec2(wx+tiltX, -wy+tiltY) + lensShift + trailShift;
-  vec2 clip = (p/uRes)*2.0-1.0;
-  clip.y = -clip.y;
-
+  float scroll = mod(aScroll+uTime*0.002,1.0);
+  float t      = aPos.x/uRes.x;
+  float freq   = 0.6+t*3.5;
+  // Gentle ambient oscillation — always present, small
+  float wy = waveVal(aType,t,scroll,freq,aPhase,1.8);
+  float wx = waveVal(mod(aType+2.0,5.0),1.0-t,scroll*0.7,0.4+(1.0-t)*2.8,aPhase+1.57,0.6);
+  vec2 p   = aPos + vec2(wx,-wy);
+  vec2 clip= (p/uRes)*2.0-1.0; clip.y=-clip.y;
   gl_Position  = vec4(clip,0.0,1.0);
   gl_PointSize = 2.0;
   vBright = aBright;
-  vAlpha  = 0.85 + clamp(trailInf*0.1, 0.0, 0.15);
-  // Pass normalised original position for texture sampling in frag
-
+  vAlpha  = 0.88;
 }`;
 
   const FRAG = `
 precision mediump float;
-varying float vBright;
-varying float vAlpha;
+varying float vBright; varying float vAlpha;
 void main(){
-  vec2 c = gl_PointCoord-0.5;
-  if(dot(c,c)>0.25) discard;
-  gl_FragColor = vec4(vec3(vBright), vAlpha);
+  vec2 c=gl_PointCoord-0.5; if(dot(c,c)>0.25) discard;
+  gl_FragColor=vec4(vec3(vBright),vAlpha);
 }`;
 
   function mkShader(type,src){
@@ -566,26 +477,20 @@ void main(){
   gl.attachShader(prog,mkShader(gl.VERTEX_SHADER,VERT));
   gl.attachShader(prog,mkShader(gl.FRAGMENT_SHADER,FRAG));
   gl.linkProgram(prog);
-  if(!gl.getProgramParameter(prog,gl.LINK_STATUS)) console.error(gl.getProgramInfoLog(prog));
 
-  const aPos    =gl.getAttribLocation(prog,'aPos');
-  const aType   =gl.getAttribLocation(prog,'aType');
-  const aPhase  =gl.getAttribLocation(prog,'aPhase');
-  const aScroll =gl.getAttribLocation(prog,'aScroll');
-  const aBright =gl.getAttribLocation(prog,'aBright');
-  const uRes    =gl.getUniformLocation(prog,'uRes');
-  const uMouse  =gl.getUniformLocation(prog,'uMouse');
-  const uWarp   =gl.getUniformLocation(prog,'uWarp');
-  const uTime   =gl.getUniformLocation(prog,'uTime');
-  const uTrailPos=gl.getUniformLocation(prog,'uTrailPos[0]');
-  const uTrailAge=gl.getUniformLocation(prog,'uTrailAge[0]');
+  const aPos=gl.getAttribLocation(prog,'aPos');
+  const aType=gl.getAttribLocation(prog,'aType');
+  const aPhase=gl.getAttribLocation(prog,'aPhase');
+  const aScroll=gl.getAttribLocation(prog,'aScroll');
+  const aBright=gl.getAttribLocation(prog,'aBright');
+  const uRes=gl.getUniformLocation(prog,'uRes');
+  const uTime=gl.getUniformLocation(prog,'uTime');
 
+  const GRAIN=2, STRIDE=6; // px,py,type,phase,scroll,bright
+  let grainData=null, nPts=0, buf=null;
+  let origX=null, origY=null; // original positions for lens source
+  let ready=false;
 
-  const GRAIN=2;
-  let imgBuf=null, imgN=0;
-  let txtBuf=null, txtN=0;
-
-  // ── Build image grain buffer ─────────────────────────────
   function buildGrains(img){
     const tmp=document.createElement('canvas');
     tmp.width=W; tmp.height=H;
@@ -596,63 +501,83 @@ void main(){
     ctx.filter='grayscale(100%) contrast(2.4) brightness(0.75)';
     ctx.drawImage(img,dx,dy,dw,dh); ctx.filter='none';
     const pix=ctx.getImageData(0,0,W,H).data;
-    const cols=Math.floor(W/GRAIN),rows=Math.floor(H/GRAIN);
-    imgN=rows*cols;
-    const data=new Float32Array(imgN*6);
+
+    const cols=Math.floor(W/GRAIN), rows=Math.floor(H/GRAIN);
+    nPts=rows*cols;
+    grainData=new Float32Array(nPts*STRIDE);
+    origX=new Float32Array(nPts);
+    origY=new Float32Array(nPts);
+
     let k=0,si=0;
     for(let j=0;j<rows;j++){
       for(let i=0;i<cols;i++){
-        const px=i*GRAIN,py=j*GRAIN;
+        const px=i*GRAIN, py=j*GRAIN;
         const idx=(py*W+px)*4;
         const bv=(0.299*pix[idx]+0.587*pix[idx+1]+0.114*pix[idx+2])/255;
-        data[k++]=px; data[k++]=py;
-        data[k++]=si%5; data[k++]=Math.random()*6.28;
-        data[k++]=Math.random(); data[k++]=Math.pow(bv,0.7);
-        si++;
+        grainData[k]  =px; grainData[k+1]=py;
+        grainData[k+2]=si%5;
+        grainData[k+3]=Math.random()*6.28;
+        grainData[k+4]=Math.random();
+        grainData[k+5]=Math.pow(bv,0.7);
+        origX[si]=px; origY[si]=py;
+        k+=STRIDE; si++;
       }
     }
-    if(imgBuf) gl.deleteBuffer(imgBuf);
-    imgBuf=gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER,imgBuf);
-    gl.bufferData(gl.ARRAY_BUFFER,data,gl.STATIC_DRAW);
+    if(buf) gl.deleteBuffer(buf);
+    buf=gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER,buf);
+    gl.bufferData(gl.ARRAY_BUFFER,grainData,gl.DYNAMIC_DRAW); // DYNAMIC for updates
+    ready=true;
   }
 
-  // ── Build title text grain buffer ───────────────────────
-  // Renders "ANDRÉ DAMIÃO" using Barlow Condensed, samples pixels
-  function buildTitle(){
-    const tmp=document.createElement('canvas');
-    tmp.width=W; tmp.height=H;
-    const ctx=tmp.getContext('2d',{willReadFrequently:true});
-    ctx.fillStyle='#000'; ctx.fillRect(0,0,W,H);
-    const fs=Math.min(H*0.28, W*0.12);
-    ctx.fillStyle='#fff';
-    ctx.font=`200 ${fs}px 'Barlow Condensed',Arial Narrow,sans-serif`;
-    ctx.textBaseline='middle';
-    const txt='ANDRÉ DAMIÃO';
-    const tw=ctx.measureText(txt).width;
-    ctx.fillText(txt,(W-tw)/2, H*0.5);
-    const pix=ctx.getImageData(0,0,W,H).data;
-    const TG=1; // maximum density for crisp title
-    const pts=[];
-    let si=0;
-    for(let j=0;j<H;j+=TG){
-      for(let i=0;i<W;i+=TG){
-        const idx=(j*W+i)*4;
-        if(pix[idx]>60){ // only lit pixels
-          pts.push(i,j, si%5, Math.random()*6.28, Math.random(), 1.0);
-          si++;
-        }
-      }
+  // ── PERMANENT DISTORTION ─────────────────────────────────
+  // Every frame when hovering, nudge nearby grain positions permanently.
+  // Uses a simple radial displacement + wave offset baked into position.
+  const RX=0.35, RY=0.35; // fraction of W/H
+  let dirtyMin=0, dirtyMax=0; // track which indices changed for subData upload
+
+  function applyDistortion(mxPx, myPx, strength){
+    const rx=W*RX, ry=H*RY;
+    const MAX_NUDGE=3.5*strength; // px permanently displaced per frame
+    dirtyMin=nPts; dirtyMax=-1;
+
+    for(let si=0;si<nPts;si++){
+      const k=si*STRIDE;
+      const gx=grainData[k], gy=grainData[k+1];
+      const dx=gx-mxPx, dy=gy-myPx;
+      const distX=Math.abs(dx)/rx, distY=Math.abs(dy)/ry;
+      if(distX>1||distY>1) continue;
+      const inf=(1-distX)*(1-distY);
+      if(inf<0.01) continue;
+
+      // Wave type for this grain row
+      const type=grainData[k+2];
+      const t=origX[si]/W;
+      const freq=0.6+t*3.5;
+      const phase=grainData[k+3];
+
+      // Compute wave displacement direction
+      const angle=Math.atan2(dy,dx);
+      const nudge=inf*MAX_NUDGE;
+      // Push grain away from mouse + add perpendicular wave component
+      grainData[k]   += Math.cos(angle+Math.PI)*nudge + Math.sin(angle)*nudge*0.4;
+      grainData[k+1] += Math.sin(angle+Math.PI)*nudge + Math.cos(angle)*nudge*0.4;
+
+      if(si<dirtyMin) dirtyMin=si;
+      if(si>dirtyMax) dirtyMax=si;
     }
-    txtN=pts.length/6;
-    if(txtN===0) return;
-    const data=new Float32Array(pts);
-    if(txtBuf) gl.deleteBuffer(txtBuf);
-    txtBuf=gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER,txtBuf);
-    gl.bufferData(gl.ARRAY_BUFFER,data,gl.STATIC_DRAW);
+
+    // Upload only changed portion
+    if(dirtyMax>=dirtyMin){
+      gl.bindBuffer(gl.ARRAY_BUFFER,buf);
+      const byteOffset=dirtyMin*STRIDE*4;
+      const subArr=grainData.subarray(dirtyMin*STRIDE,(dirtyMax+1)*STRIDE);
+      gl.bufferSubData(gl.ARRAY_BUFFER,byteOffset,subArr);
+    }
   }
 
   function setAttribs(){
-    const ST=6*4;
+    const ST=STRIDE*4;
     gl.enableVertexAttribArray(aPos);    gl.vertexAttribPointer(aPos,   2,gl.FLOAT,false,ST,0);
     gl.enableVertexAttribArray(aType);   gl.vertexAttribPointer(aType,  1,gl.FLOAT,false,ST,8);
     gl.enableVertexAttribArray(aPhase);  gl.vertexAttribPointer(aPhase, 1,gl.FLOAT,false,ST,12);
@@ -660,50 +585,37 @@ void main(){
     gl.enableVertexAttribArray(aBright); gl.vertexAttribPointer(aBright,1,gl.FLOAT,false,ST,20);
   }
 
-  function rebuildAll(){
-    buildGrains(bgImg);
-  }
-  bgImg.addEventListener('load', rebuildAll);
+  function rebuildAll(){ buildGrains(bgImg); prepLens(); }
+  bgImg.addEventListener('load',rebuildAll);
   if(bgImg.complete&&bgImg.naturalWidth>0) rebuildAll();
 
-  // ── Render loop ─────────────────────────────────────────
-  let mx=W/2,my=H/2, warpAmt=0,warpTarget=0, frame=0;
-  let warpDecay=0;
-  gl.enable(gl.BLEND);
-  gl.blendFunc(gl.SRC_ALPHA,gl.ONE_MINUS_SRC_ALPHA);
+  // ── Render ───────────────────────────────────────────────
+  let hover=false, mxPx=0, myPx=0, warpStrength=0, warpTarget=0, frame=0;
+  gl.enable(gl.BLEND); gl.blendFunc(gl.SRC_ALPHA,gl.ONE_MINUS_SRC_ALPHA);
 
   function render(){
     requestAnimationFrame(render);
-    if(!imgBuf) return;
-    frame++; ageTrail();
-    // Warp lingers: decays slowly after mouse leaves
-    if(warpTarget<0.01) warpAmt=Math.max(0.3, warpAmt*0.998); else warpAmt+=(warpTarget-warpAmt)*0.10;
+    if(!ready) return;
+    frame++;
+
+    // Smooth warp strength
+    warpStrength+=(warpTarget-warpStrength)*0.12;
+
+    // Apply permanent distortion when hovering
+    if(hover && warpStrength>0.05) applyDistortion(mxPx,myPx,warpStrength);
 
     gl.viewport(0,0,W,H);
     gl.clearColor(0,0,0,0); gl.clear(gl.COLOR_BUFFER_BIT);
     gl.useProgram(prog);
-
-    // Upload trail uniforms
-    // Build flat [x0,y0,x1,y1,...] array for uniform upload
-    const trailFlat=new Float32Array(TRAIL_LEN*2);
-    for(let i=0;i<TRAIL_LEN;i++){trailFlat[i*2]=trailX[i];trailFlat[i*2+1]=trailY[i];}
-    gl.uniform2fv(uTrailPos, trailFlat);
-    gl.uniform1fv(uTrailAge, trailAge);
+    gl.bindBuffer(gl.ARRAY_BUFFER,buf); setAttribs();
     gl.uniform2f(uRes,W,H);
-    gl.uniform2f(uMouse,mx,my);
-    gl.uniform1f(uWarp,warpAmt);
     gl.uniform1f(uTime,frame);
-
-    // Draw image grains
-    gl.bindBuffer(gl.ARRAY_BUFFER,imgBuf); setAttribs();
-    gl.drawArrays(gl.POINTS,0,imgN);
-
-
+    gl.drawArrays(gl.POINTS,0,nPts);
   }
   render();
 
-  // ── Lens (2D canvas) ────────────────────────────────────
-  const lctx=lensCnv.getContext('2d');
+  // ── Lens (2D canvas) ─────────────────────────────────────
+  const lctx=lensCnv.getContext('2d',{willReadFrequently:true});
   const lsrc=document.createElement('canvas');
   let srcReady=false;
   const LR=90, LSTR=0.85;
@@ -759,26 +671,21 @@ void main(){
   }
   lensRender();
 
-  // ── Shared pointer events ────────────────────────────────
-  let lastTrailPush=0;
+  // ── Pointer events ────────────────────────────────────────
   function onMove(e){
     const rect=wrap.getBoundingClientRect();
-    mx=(e.clientX-rect.left)/rect.width*W;
-    my=(e.clientY-rect.top)/rect.height*H;
-    lmx=mx; lmy=my;
-    warpTarget=1; lstrT=1;
-    // Push to trail every ~30ms to avoid flooding
-    const now=Date.now();
-    if(now-lastTrailPush>15){ pushTrail(mx,my); lastTrailPush=now; }
+    mxPx=(e.clientX-rect.left)/rect.width*W;
+    myPx=(e.clientY-rect.top)/rect.height*H;
+    lmx=mxPx; lmy=myPx;
+    hover=true; warpTarget=1; lstrT=1;
   }
-  function onEnd(){ warpTarget=0; lstrT=0; }
+  function onEnd(){ hover=false; warpTarget=0; lstrT=0; }
   wrap.addEventListener('pointermove',onMove);
   wrap.addEventListener('pointerdown',function(e){wrap.setPointerCapture(e.pointerId);onMove(e);});
   wrap.addEventListener('pointerleave',onEnd);
   wrap.addEventListener('pointerup',function(e){if(e.pointerType==='touch')onEnd();});
   wrap.addEventListener('pointercancel',onEnd);
 })();
-</script>
 
 <script>
 
