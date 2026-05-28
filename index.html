@@ -425,15 +425,22 @@ canvas, img, svg, rect {
     glCnv.width  = W; glCnv.height  = H;
     lensCnv.width= W; lensCnv.height= H;
   }
+  // Handle device pixel ratio for mobile sharpness
+  // Use CSS pixels for WebGL (no DPR scaling to keep performance)
   resize();
   window.addEventListener('resize', function(){
     resize();
     srcReady=false;
     if(bgImg.complete&&bgImg.naturalWidth>0){ rebuildGL(); prepLens(); }
   });
+  // Mobile orientation change
+  window.addEventListener('orientationchange', function(){
+    setTimeout(function(){ resize(); if(bgImg.complete&&bgImg.naturalWidth>0){rebuildGL();prepLens();} }, 200);
+  });
 
   // ── WebGL shader ─────────────────────────────────────────
-  const gl = glCnv.getContext('webgl',{alpha:true,premultipliedAlpha:false});
+  const gl = glCnv.getContext('webgl',{alpha:true,premultipliedAlpha:false,antialias:false})
+          || glCnv.getContext('experimental-webgl',{alpha:true,premultipliedAlpha:false});
   if(!gl){ console.error('no webgl'); return; }
 
   const VERT = `
@@ -493,9 +500,11 @@ void main(){
   // Circular distance, aspect-corrected
   vec2  dAsp   = delta * vec2(1.0, uRes.x/uRes.y);
   float dist   = length(dAsp);
-  float radius = uRes.x * (0.06 + 0.12*uWarp);  // tight, circular
+  float radius = uRes.x * (0.07 + 0.13*uWarp);
   float inf    = clamp(1.0 - dist/radius, 0.0, 1.0);
-  inf = inf * inf * inf;  // cubic — very tight at edges
+  // Smoothstep + cubic for invisible edge
+  inf = inf * inf * (3.0 - 2.0*inf);  // smoothstep
+  inf = inf * inf;                      // then square for tight center
 
   // Base amp always > 0 — dots always move gently at rest
   float amp  = 1.5 + 65.0 * inf * uWarp;
@@ -512,8 +521,15 @@ void main(){
   float tiltX = sign(delta.y) * inf * 12.0 * uWarp;
   float tiltY = sign(delta.x) * inf *  8.0 * uWarp;
 
+  // Fish-eye lens: shift dot position toward mouse center (barrel distortion)
+  // This makes dots appear to bulge outward, same as the 2D lens
+  float lensR  = uRes.x * 0.09 * uWarp;
+  float lensInf = clamp(1.0 - dist/max(lensR,0.001), 0.0, 1.0);
+  lensInf = lensInf * lensInf;
+  vec2  lensShift = -delta * lensInf * 0.25 * uWarp; // push dots away from mouse
+
   // Convert to clip space (-1..1)
-  vec2 p = aPos + vec2(wx + tiltX, -wy + tiltY);
+  vec2 p = aPos + vec2(wx + tiltX, -wy + tiltY) + lensShift;
   vec2 clip = (p / uRes) * 2.0 - 1.0;
   clip.y = -clip.y;  // flip Y for WebGL
 
@@ -637,7 +653,7 @@ void main(){
   const lctx=lensCnv.getContext('2d');
   const src=document.createElement('canvas');
   let srcReady=false;
-  const R=90, STR=0.6;
+  const R=90, STR=0.85;
   let lmx=0,lmy=0,lstr=0,lstrT=0,lf=0;
 
   function prepLens(){
