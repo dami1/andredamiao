@@ -389,7 +389,7 @@ canvas, img, svg, rect {
 <div class="sono-wrap" id="sono1" style="height:40px;margin-top:10px;"></div>
 
 <div id="csOuter" style="flex:1;min-height:0;border-top:2px solid var(--fg);position:relative;overflow:hidden;touch-action:none;">
-  <img id="bg-img" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;z-index:0;display:none;" crossorigin="anonymous">
+  <img id="bg-img" style="position:absolute;inset:0;width:100%;height:100%;object-fit:contain;z-index:0;display:block;background:#080808;" crossorigin="anonymous">
   <canvas id="lens-canvas" style="position:absolute;inset:0;width:100%;height:100%;z-index:1;pointer-events:none;"></canvas>
   <canvas id="gl-canvas"   style="position:absolute;inset:0;width:100%;height:100%;z-index:2;pointer-events:none;"></canvas>
 </div>
@@ -490,9 +490,9 @@ void main(){
   // Circular distance, aspect-corrected
   vec2  dAsp   = delta * vec2(1.0, uRes.x/uRes.y);
   float dist   = length(dAsp);
-  float radius = uRes.x * (0.08 + 0.18*uWarp);  // much smaller, circular
+  float radius = uRes.x * (0.06 + 0.12*uWarp);  // tight, circular
   float inf    = clamp(1.0 - dist/radius, 0.0, 1.0);
-  inf = inf * inf * inf;  // steeper falloff — tight circle
+  inf = inf * inf * inf;  // cubic — very tight at edges
 
   // Base amp always > 0 — dots always move gently at rest
   float amp  = 1.5 + 65.0 * inf * uWarp;
@@ -559,8 +559,13 @@ void main(){
     const tmp=document.createElement('canvas');
     tmp.width=W; tmp.height=H;
     const ctx=tmp.getContext('2d');
+    // Draw with contain (letterbox) to match bg-img display
+    const iw=img.naturalWidth, ih=img.naturalHeight;
+    const sc=Math.min(W/iw,H/ih);
+    const dw=iw*sc, dh=ih*sc, dx=(W-dw)/2, dy=(H-dh)/2;
+    ctx.fillStyle='#080808'; ctx.fillRect(0,0,W,H);
     ctx.filter='grayscale(100%) contrast(2.0) brightness(0.8)';
-    ctx.drawImage(img,0,0,W,H); ctx.filter='none';
+    ctx.drawImage(img,dx,dy,dw,dh); ctx.filter='none';
     const pix=ctx.getImageData(0,0,W,H).data;
     const cols=Math.floor(W/GRAIN), rows=Math.floor(H/GRAIN);
     nPoints=rows*cols;
@@ -635,8 +640,15 @@ void main(){
   function prepLens(){
     src.width=W; src.height=H;
     const sctx=src.getContext('2d');
+    sctx.fillStyle='#080808';
+    sctx.fillRect(0,0,W,H);
+    // Draw with contain (letterbox) — no distortion
+    const iw=bgImg.naturalWidth, ih=bgImg.naturalHeight;
+    const scale=Math.min(W/iw, H/ih);
+    const dw=iw*scale, dh=ih*scale;
+    const dx=(W-dw)/2, dy=(H-dh)/2;
     sctx.filter='grayscale(100%) contrast(2.0) brightness(0.8)';
-    sctx.drawImage(bgImg,0,0,W,H); sctx.filter='none';
+    sctx.drawImage(bgImg,dx,dy,dw,dh); sctx.filter='none';
     srcReady=true;
   }
   bgImg.addEventListener('load', prepLens);
