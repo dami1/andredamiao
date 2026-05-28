@@ -397,21 +397,8 @@ canvas, img, svg, rect {
 <script>
 // ── P5 CAROUSEL ──────────────────────────────────────────
 new p5(function(sk) {
-  var imgs = [], N = 0, loaded = 0;
-  var captions = [];
-  var W, H, ITEM_W;
-  var pos = 0;
-  var isDragging = false, dragStartX = 0, dragPosStart = 0;
 
-  // Pixel effect state
-  var mx = 0.5, my = 0.5; // normalised 0-1
-  var hover = false;
-  var decompAmt = 0, decompTarget = 0;
-
-  // Per-image grain arrays — built once
-  var grainSets = {};
-  var GRAIN = 10; // coarser = faster
-
+  // ── shared wave functions (same as title) ──
   function waveVal(type, t, scroll, freq, phase, amp, noise) {
     const x = (t * freq + scroll) % 1;
     const a = x * Math.PI * 2 + phase;
@@ -448,14 +435,71 @@ new p5(function(sk) {
     return arr;
   }
 
+  var imgFiles = [], captions = [], imgs = [], N = 0, loaded = 0;
+  var W, H;
+  var pos = 0;                  // scroll px
+  var isDragging = false, dragStartX = 0, dragPosStart = 0;
+  var hover = false, mxPx = 0, myPx = 0;
+  var decompAmt = 0, decompTarget = 0;
+  var grainSets = {};           // keyed by image index
+  var srcCanvases = {};         // greyscale source per image
+  const GRAIN = 8;
+
+  // ── build grain array from a source canvas ──
+  function buildGrains(srcCtx, iW, iH) {
+    var pix = srcCtx.getImageData(0, 0, iW, iH).data;
+    var g = [], si = 0;
+    for (var j = 0; j < iH; j += GRAIN) {
+      for (var i = 0; i < iW; i += GRAIN) {
+        var idx = (j * iW + i) * 4;
+        var bv = (0.299*pix[idx] + 0.587*pix[idx+1] + 0.114*pix[idx+2]) / 255;
+        var bright = Math.round(Math.pow(bv, 0.78) * 255);
+        var type = si % 5, t = i / iW;
+        g.push({
+          // positions in image-space (0..iW, 0..iH)
+          px: i, py: j, bright, type, t,
+          freq:  0.6 + t * 3.5,
+          phase: Math.random() * Math.PI * 2,
+          scroll: Math.random(),
+          speed:  0.002 + Math.random() * 0.003,
+          noise:  (type === 3) ? makeNoise(80) : null,
+          amp: 0, ampTarget: 0,
+          rx: 0, rxTarget: 0,
+          ry: 0, ryTarget: 0,
+          rxDir: Math.random() > 0.5 ? 1 : -1,
+          ryDir: Math.random() > 0.5 ? 1 : -1
+        });
+        si++;
+      }
+    }
+    return g;
+  }
+
+  // ── ensure grain set exists for image idx ──
+  function ensureGrains(idx) {
+    if (grainSets[idx]) return;
+    var img = imgs[idx];
+    if (!img) return;
+    // Draw image to temp canvas to read pixels
+    var tmp = document.createElement('canvas');
+    tmp.width = img.width; tmp.height = img.height;
+    var ctx = tmp.getContext('2d');
+    ctx.filter = 'grayscale(100%) contrast(2) brightness(0.85)';
+    ctx.drawImage(img.canvas || img.elt || img, 0, 0);
+    ctx.filter = 'none';
+    srcCanvases[idx] = { ctx, w: tmp.width, h: tmp.height };
+    grainSets[idx] = buildGrains(ctx, tmp.width, tmp.height);
+  }
+
   sk.preload = function() {
     sk.loadJSON('imagens/imagens.json?v=' + Date.now(), function(data) {
       captions = data;
-      N = data.length;
-      data.forEach(function(d, i) {
-        sk.loadImage('imagens/' + d.arquivo,
+      imgFiles = data.map(function(d) { return d.arquivo; });
+      N = imgFiles.length;
+      imgFiles.forEach(function(f, i) {
+        sk.loadImage('imagens/' + f,
           function(img) { imgs[i] = img; loaded++; },
-          function()    { loaded++; console.warn('failed:', d.arquivo); }
+          function()    { loaded++; console.warn('failed:', f); }
         );
       });
     });
@@ -464,139 +508,129 @@ new p5(function(sk) {
   sk.setup = function() {
     var wrap = document.getElementById('csOuter');
     W = wrap.offsetWidth;
-    H = wrap.offsetHeight || Math.round(window.innerHeight * 0.65);
-    ITEM_W = W;
+    H = wrap.offsetHeight || Math.round(window.innerHeight * 0.7);
     var cnv = sk.createCanvas(W, H);
     cnv.parent('csOuter');
     cnv.elt.style.cssText = 'display:block;position:absolute;inset:0;';
     sk.pixelDensity(1);
     sk.frameRate(20);
     sk.noStroke();
+    sk.imageMode(sk.CORNER);
 
+    // pointer events
     cnv.elt.style.touchAction = 'none';
-
-    cnv.elt.addEventListener('pointermove', function(e) {
-      var r = cnv.elt.getBoundingClientRect();
-      mx = (e.clientX - r.left) / r.width;
-      my = (e.clientY - r.top)  / r.height;
-      hover = true; decompTarget = 1;
-      if (isDragging) pos = dragPosStart + (dragStartX - e.clientX);
-    });
     cnv.elt.addEventListener('pointerdown', function(e) {
       cnv.elt.setPointerCapture(e.pointerId);
       isDragging = true; dragStartX = e.clientX; dragPosStart = pos;
       hover = true; decompTarget = 1;
+      var r = cnv.elt.getBoundingClientRect();
+      mxPx = e.clientX - r.left; myPx = e.clientY - r.top;
+    });
+    cnv.elt.addEventListener('pointermove', function(e) {
+      var r = cnv.elt.getBoundingClientRect();
+      mxPx = e.clientX - r.left; myPx = e.clientY - r.top;
+      hover = true; decompTarget = 1;
+      if (isDragging) pos = dragPosStart + (dragStartX - e.clientX);
     });
     cnv.elt.addEventListener('pointerup', function(e) {
       isDragging = false;
       if (e.pointerType === 'touch') { hover = false; decompTarget = 0; }
     });
-    cnv.elt.addEventListener('pointerleave',  function() { isDragging = false; hover = false; decompTarget = 0; });
-    cnv.elt.addEventListener('pointercancel', function() { isDragging = false; hover = false; decompTarget = 0; });
+    cnv.elt.addEventListener('pointerleave', function() {
+      isDragging = false; hover = false; decompTarget = 0;
+    });
+    cnv.elt.addEventListener('pointercancel', function() {
+      isDragging = false; hover = false; decompTarget = 0;
+    });
     document.addEventListener('keydown', function(e) {
-      if (e.key === 'ArrowRight') pos += ITEM_W;
-      if (e.key === 'ArrowLeft')  pos -= ITEM_W;
+      if (e.key === 'ArrowRight') pos += W;
+      if (e.key === 'ArrowLeft')  pos -= W;
     });
   };
 
-  function buildGrains(idx) {
-    var img = imgs[idx];
-    if (!img) return [];
-    var g = [], si = 0;
-    // Sample at grain spacing, mapped to canvas size
-    var cols = Math.floor(W / GRAIN);
-    var rows = Math.floor(H / GRAIN);
-    for (var j = 0; j < rows; j++) {
-      for (var i = 0; i < cols; i++) {
-        // Sample pixel from source image
-        var sx = Math.round(i / cols * img.width);
-        var sy = Math.round(j / rows * img.height);
-        var c  = img.get(sx, sy);
-        var bv = (sk.red(c)*0.299 + sk.green(c)*0.587 + sk.blue(c)*0.114) / 255;
-        var bright = Math.round(Math.pow(bv, 0.78) * 255);
-        var type = si % 5, t = i / cols;
-        g.push({
-          // canvas coords (not centred)
-          cx: i * GRAIN, cy: j * GRAIN,
-          bright, type, t,
-          freq: 0.6 + t*3.5,
-          phase: Math.random()*Math.PI*2,
-          scroll: Math.random(),
-          speed: 0.002 + Math.random()*0.003,
-          noise: (type===3)?makeNoise(80):null,
-          amp:0, ampTarget:0
-        });
-        si++;
-      }
-    }
-    return g;
-  }
-
   sk.draw = function() {
-    if (loaded < N || N === 0) {
-      sk.background(8);
-      return;
-    }
+    if (loaded < N || N === 0) { sk.background(8); return; }
 
-    // Auto-scroll
-    if (!isDragging) pos += 0.4;
-    var total = ITEM_W * N;
+    // auto-scroll — faster
+    if (!isDragging) pos += 0.8;
+
+    // wrap
+    var total = W * N;
     pos = ((pos % total) + total) % total;
 
     decompAmt += (decompTarget - decompAmt) * 0.12;
 
     sk.background(8);
 
-    // Draw each visible image
-    for (var n = 0; n < N + 1; n++) {
-      var imgIdx = n % N;
-      var imgX   = n * ITEM_W - pos;
-      if (imgX + ITEM_W < 0 || imgX > W) continue;
+    // draw two rounds to handle wrap-around
+    for (var pass = 0; pass < 2; pass++) {
+      for (var n = 0; n < N; n++) {
+        var imgX = n * W - pos + pass * total;
+        if (imgX + W < 0 || imgX > W) continue;
 
-      var img = imgs[imgIdx];
-      if (!img) continue;
+        var img = imgs[n];
+        if (!img) continue;
 
-      // Base image — greyscale via tint trick
-      sk.push();
-      sk.tint(255);
-      sk.image(img, imgX, 0, ITEM_W, H);
-      sk.pop();
+        // base image in greyscale
+        sk.push();
+        sk.drawingContext.filter = 'grayscale(100%) contrast(1.2)';
+        sk.image(img, imgX, 0, W, H);
+        sk.drawingContext.filter = 'none';
+        sk.pop();
 
-      // Pixel layer — only draw if hovering
-      if (decompAmt > 0.01) {
-        // Build grains lazily
-        if (!grainSets[imgIdx]) grainSets[imgIdx] = buildGrains(imgIdx);
-        drawGrains(grainSets[imgIdx], imgX);
+        // pixel layer — only the visible slide, only when hovering
+        if (decompAmt > 0.01) {
+          ensureGrains(n);
+          if (grainSets[n]) drawGrains(n, imgX);
+        }
       }
     }
   };
 
-  function drawGrains(grains, imgX) {
-    var RX = W * 0.35 * decompAmt;
-    var RY = H * 0.35 * decompAmt;
-    var MAX_AMP = 55;
-    var mxPx = mx * W, myPx = my * H;
+  function drawGrains(idx, imgX) {
+    var src = srcCanvases[idx];
+    var grains = grainSets[idx];
+    if (!grains || !src) return;
+
+    var scaleX = W / src.w;
+    var scaleY = H / src.h;
+    var RX = W * 0.35, RY = H * 0.35;
+    var MAX_AMP = 55, MAX_TILT = 0.5;
 
     for (var i = 0; i < grains.length; i++) {
       var g = grains[i];
-      var gx = imgX + g.cx;
-      var gy = g.cy;
+      // canvas position of this grain
+      var gx = imgX + g.px * scaleX;
+      var gy = g.py * scaleY;
 
       var dx = hover ? Math.abs(mxPx - gx) : 9999;
       var dy = hover ? Math.abs(myPx - gy) : 9999;
       var near = dx < RX && dy < RY;
 
-      if (near || g.amp > 0.3) {
+      if (near || g.amp > 0.3 || Math.abs(g.rx) > 0.01) {
         g.scroll = (g.scroll + g.speed) % 1;
-        g.ampTarget = near ? (1-dx/RX)*(1-dy/RY)*MAX_AMP : 0;
+        if (near) {
+          var ix = Math.max(0, 1-dx/RX), iy = Math.max(0, 1-dy/RY);
+          var inf = ix * iy;
+          g.ampTarget = inf * MAX_AMP * decompAmt;
+          var signX = (myPx > gy) ? 1 : -1;
+          var signY = (mxPx > gx) ? 1 : -1;
+          g.rxTarget = signX * inf * MAX_TILT * decompAmt;
+          g.ryTarget = signY * inf * MAX_TILT * decompAmt;
+        } else {
+          g.ampTarget = 0; g.rxTarget = 0; g.ryTarget = 0;
+        }
         g.amp += (g.ampTarget - g.amp) * 0.18;
+        g.rx  += (g.rxTarget - g.rx) * 0.15;
+        g.ry  += (g.ryTarget - g.ry) * 0.15;
+      } else {
+        g.rx *= 0.9; g.ry *= 0.9;
+        if (g.amp < 0.05) continue; // skip completely flat grains
       }
 
-      if (g.amp < 0.3 && !near) continue; // skip draw if flat
-
       var wy = waveVal(g.type, g.t, g.scroll, g.freq, g.phase, g.amp, g.noise);
-      var v  = g.bright;
-      sk.fill(v, v, v, 210);
+      var v = g.bright;
+      sk.fill(v, v, v, 200);
       sk.circle(gx, gy - wy, 2);
     }
   }
@@ -606,10 +640,10 @@ new p5(function(sk) {
     if (!wrap) return;
     W = wrap.offsetWidth;
     H = wrap.offsetHeight;
-    ITEM_W = W;
     sk.resizeCanvas(W, H);
-    grainSets = {}; // rebuild on resize
+    grainSets = {}; srcCanvases = {}; // rebuild at new size
   };
+
 });
 </script>
 
