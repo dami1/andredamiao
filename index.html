@@ -80,11 +80,11 @@
   --bg:#0a0a0a;--fg:#f0ede6;--dim:#999;--lt:#666;
 }
 body{
-  background:var(--bg);color:var(--fg);
+  background:#080808;color:var(--fg);
   font-family:'Barlow',Arial,sans-serif;
   font-weight:300;font-size:14px;line-height:1.7;
   overflow-x:hidden;
-  transition: background-color 1.2s ease;
+
 }
 a{color:var(--fg);text-decoration:none;}
 a:hover{text-decoration:underline;text-underline-offset:3px;}
@@ -367,6 +367,7 @@ canvas, img, svg, rect {
 
 <header class="site-header" id="siteHeader">
   <div class="site-name" id="sname">ANDRÉ DAMIÃO</div>
+  <canvas id="title-gl-canvas" style="position:absolute;top:0;left:0;pointer-events:none;z-index:3;"></canvas>
   <div class="site-meta" id="site-meta"
     data-pt="Composição &nbsp;/&nbsp; Código &nbsp;/&nbsp; Pesquisa"
     data-en="Composition &nbsp;/&nbsp; Code &nbsp;/&nbsp; Research">
@@ -397,7 +398,6 @@ canvas, img, svg, rect {
 
 <script src="https://cdn.jsdelivr.net/npm/p5@1.9.0/lib/p5.min.js"></script>
 
-<script>
 <script>
 // ── WEBGL: image dots + title text + mouse trail ────────
 (function(){
@@ -666,7 +666,7 @@ void main(){
   }
 
   function rebuildAll(){
-    buildGrains(bgImg); buildTitle();
+    buildGrains(bgImg);
   }
   bgImg.addEventListener('load', rebuildAll);
   if(bgImg.complete&&bgImg.naturalWidth>0) rebuildAll();
@@ -700,11 +700,7 @@ void main(){
     gl.bindBuffer(gl.ARRAY_BUFFER,imgBuf); setAttribs();
     gl.drawArrays(gl.POINTS,0,imgN);
 
-    // Draw title grains on top
-    if(txtBuf&&txtN>0){
-      gl.bindBuffer(gl.ARRAY_BUFFER,txtBuf); setAttribs();
-      gl.drawArrays(gl.POINTS,0,txtN);
-    }
+
   }
   render();
 
@@ -791,210 +787,7 @@ void main(){
 // ═══════════════════════════════════════════════════════════
 // 1. TITLE GLITCH — p5.glitch renders text as image, glitches
 // ═══════════════════════════════════════════════════════════
-new p5(function(sk) {
-  let W, H, fn = 0;
-  let mouseOver = false;
-  let mouseXLocal = 0;
-  let particles = [], textReady = false;
-
-  function sampleText(W, fs, H) {
-    const pg = sk.createGraphics(W, H);
-    pg.background(0,0,0,0);
-    pg.fill(255); pg.noStroke();
-    pg.textFont('Arial Narrow, Arial');
-    pg.textStyle(pg.NORMAL);
-    pg.textSize(fs);
-    pg.text('ANDRÉ DAMIÃO', 0, fs * 0.88);
-    pg.loadPixels();
-    const pix = pg.pixels, PW = pg.width, PH = pg.height;
-    // Adaptive grid: smaller = more dots = better quality
-    // On mobile (small W) use tighter grid so title doesn't look broken
-    const GRID = 3; // uniform density — smaller dots on mobile instead
-    const rows = {};
-    for (let y = 0; y < PH; y += GRID) {
-      for (let x = 0; x < PW; x += GRID) {
-        const i = (y * PW + x) * 4;
-        if (pix[i+3] > 60) {
-          const ry = Math.floor(y/GRID);
-          if (!rows[ry]) rows[ry] = { y, pts: [] };
-          rows[ry].pts.push({ ox: x, oy: y });
-        }
-      }
-    }
-    pg.remove();
-    let si = 0;
-    Object.values(rows).forEach(function(row) {
-      if (row.pts.length < 2) return;
-      const type = si % 5;
-      const xMin = row.pts[0].ox;
-      const xMax = row.pts[row.pts.length-1].ox;
-      const span = xMax - xMin || 1;
-      const freq = 0.6 + (span/W) * 3.5;
-      particles.push({
-        y: row.y, xMin, xMax, span, type, freq,
-        phase:  Math.random() * Math.PI * 2,
-        scroll: Math.random(),
-        speed:  0.0003 + Math.random() * 0.0005,
-        noise:  (type===3) ? makeNoise(120) : null,
-        dots: row.pts.map(p => ({
-          ox: p.ox, oy: p.oy,
-          t: (p.ox - xMin) / span,
-          amp: 0, ampTarget: 0
-        }))
-      });
-      si++;
-    });
-    textReady = true;
-    sk.loop();
-    }
-
-  function waveVal(type, t, scroll, freq, phase, amp, noise) {
-    const x = (t * freq + scroll) % 1;
-    const a = x * Math.PI * 2 + phase;
-    switch(type) {
-      case 0: return amp * Math.sin(a);
-      case 1: return amp * Math.max(-1, Math.min(1, Math.sin(a) * 3.5));
-      case 2: return amp * (2 * (x % 1) - 1);
-      case 3: {
-        if (!noise) return 0;
-        const pos = ((x + 1) % 1) * (noise.length - 1);
-        const i0  = Math.floor(pos) % noise.length;
-        const i1  = (i0 + 1) % noise.length;
-        return amp * (noise[i0] * (1-(pos%1)) + noise[i1] * (pos%1));
-      }
-      case 4: {
-        const p = ((x%1)+1)%1;
-        return amp * (p < 0.08 ? 1 : p < 0.16 ? -0.3 : 0);
-      }
-    }
-    return 0;
-  }
-
-  function makeNoise(npts) {
-    const freqs  = [1.3, 2.7, 5.1, 8.9];
-    const phases = freqs.map(() => Math.random() * Math.PI * 2);
-    const amps   = [0.45, 0.28, 0.17, 0.10];
-    const arr = [];
-    for (let k = 0; k <= npts; k++) {
-      const t = k / npts;
-      let v = 0;
-      freqs.forEach((f, i) => { v += amps[i] * Math.sin(t * Math.PI * 2 * f + phases[i]); });
-      arr.push(v);
-    }
-    return arr;
-  }
-
-  sk.setup = function() {
-    const header = document.getElementById('siteHeader');
-    const nameEl = document.getElementById('sname');
-    W = header.offsetWidth || 800;
-    const fs = Math.min(72, Math.max(20, W * 0.07));
-    H = Math.round(fs * 1.4);
-
-    let cnv = sk.createCanvas(W, H);
-    cnv.elt.id = 'title-canvas';
-    cnv.elt.style.cssText = 'position:absolute;top:18px;left:0;pointer-events:none;z-index:3;';
-    header.insertBefore(cnv.elt, header.firstChild);
-    nameEl.style.visibility = 'hidden';
-
-    sk.pixelDensity(1);
-    sk.frameRate(15);
-    sk.noLoop();
-
-
-
-    sampleText(W, fs, H);
-
-    // Unified input — mouse hover + touch continuous tracking
-    header.style.touchAction = 'none';
-
-    function titleMove(e) {
-      mouseOver = true; decompTarget = 1;
-      const rect = header.getBoundingClientRect();
-      mouseXLocal = e.clientX - rect.left;
-      particles.forEach(s => { s.ampTarget = 16 + Math.random() * 8; });
-    }
-    function titleEnd() {
-      mouseOver = false; decompTarget = 0;
-      particles.forEach(s => s.dots.forEach(d => { d.ampTarget = 0; }));
-    }
-
-    // Mouse hover — no click needed
-    header.addEventListener('pointermove', titleMove);
-    header.addEventListener('pointerleave', titleEnd);
-
-    // Touch — capture and track continuously
-    header.addEventListener('pointerdown', function(e) {
-      if (e.pointerType === 'touch') {
-        header.setPointerCapture(e.pointerId);
-        titleMove(e);
-      }
-    });
-    header.addEventListener('pointerup',     function(e) { if (e.pointerType === 'touch') titleEnd(); });
-    header.addEventListener('pointercancel', titleEnd);
-  };
-
-  sk.draw = function() {
-    if (!textReady) return;
-    fn++;
-    sk.clear();
-    sk.noStroke();
-
-    // Influence radius: dots within ~120px of mouse get full amp
-    const RADIUS = W < 600 ? W * 0.25 : 160; // proportional radius
-    const MAX_AMP = 16;
-
-    for (const strand of particles) {
-      strand.scroll = (strand.scroll + strand.speed) % 1;
-
-      // Update per-dot ampTarget based on distance to mouse X
-      strand.dots.forEach(function(dot) {
-        if (mouseOver) {
-          const dist = Math.abs(dot.ox - mouseXLocal);
-          const inf  = Math.max(0, 1 - dist / RADIUS);
-          dot.ampTarget = inf * MAX_AMP;
-        } else {
-          dot.ampTarget = 0;
-        }
-        // faster spring for snappier response
-        dot.amp += (dot.ampTarget - dot.amp) * 0.12;
-      });
-
-      sk.fill(240, 237, 230);
-      const DOT = W < 600 ? 1.5 : 2; // smaller on mobile so dots don't overlap
-      for (const dot of strand.dots) {
-        if (dot.amp < 0.05) {
-          sk.rect(dot.ox, dot.oy, DOT, DOT);
-        } else {
-          const dy = waveVal(strand.type, dot.t, strand.scroll, strand.freq, strand.phase, dot.amp, strand.noise);
-          sk.rect(dot.ox, dot.oy - dy, DOT, DOT);
-        }
-      }
-      // Push title warp level to global background effect
-      let titleMaxWarp = 0;
-      for (const strand of particles) {
-        for (const dot of strand.dots) {
-          if (dot.amp > titleMaxWarp) titleMaxWarp = dot.amp;
-        }
-      }
-      window._sonoWarp = Math.max(window._sonoWarp || 0, Math.min(1, titleMaxWarp / 14));
-    }
-  };
-
-  sk.windowResized = function() {
-    const header = document.getElementById('siteHeader');
-    if (!header) return;
-    W = header.offsetWidth;
-    const newFs = Math.min(72, Math.max(20, W * 0.07));
-    const newH  = Math.round(newFs * 1.5);
-    sk.resizeCanvas(W, newH);
-    // Clear and re-sample at new resolution
-    particles  = [];
-    textReady  = false;
-    mouseOver  = false;
-    sampleText(W, newFs, newH);
-  };
-});
+// title rendered by WebGL shader
 
 function makeSono(id, specs) {
   new p5(function(sk) {
@@ -1156,16 +949,7 @@ function makeSono(id, specs) {
           }
         }
       }
-      // Update global warp level for background effect
-      let maxWarp = 0;
-      for (const st of strands) {
-        for (const dot of st.dots) {
-          if (dot.amp > maxWarp) maxWarp = dot.amp;
-        }
-      }
-      // Normalise 0-1 and push to global tracker
-      const norm = Math.min(1, maxWarp / 10);
-      window._sonoWarp = Math.max(window._sonoWarp || 0, norm);
+
     };
 
     sk.windowResized = function() {
@@ -1231,38 +1015,210 @@ function setLang(lang) {
 })();
 </script>
 
+
+
+
 <script>
-// ── BACKGROUND GRADIENT FROM SONO WARP ──────────────────
-(function() {
-  window._sonoWarp = 0;
-  var currentBg = 0; // 0 = black, 1 = dark grey
+// ── TITLE WebGL SHADER ───────────────────────────────────
+(function(){
+  const nameEl  = document.getElementById('sname');
+  const header  = document.getElementById('siteHeader');
+  const glCnv   = document.getElementById('title-gl-canvas');
 
-  function lerp(a, b, t) { return a + (b - a) * t; }
+  let W, H, fs;
 
-  var pulsePhase = 0;
-
-  function tick() {
-    var target = window._sonoWarp || 0;
-    // Fast rise, moderate decay
-    currentBg += (target - currentBg) * (target > currentBg ? 0.12 : 0.03);
-    // Fast warp decay
-    window._sonoWarp = (window._sonoWarp || 0) * 0.92;
-
-    // Pulse: add sine oscillation when active
-    pulsePhase += 0.08;
-    var pulse = currentBg > 0.05 ? currentBg * 0.35 * Math.abs(Math.sin(pulsePhase)) : 0;
-    var total = Math.min(1, currentBg + pulse);
-
-    // Map 0→1 to #080808 → #888888 (much lighter ceiling)
-    var v = Math.round(lerp(8, 68, total));
-    var hex = v.toString(16).padStart(2,'0');
-    document.body.style.backgroundColor = '#' + hex + hex + hex;
-
-    requestAnimationFrame(tick);
+  function resize(){
+    W  = header.offsetWidth;
+    fs = Math.min(72, Math.max(20, W * 0.07));
+    H  = Math.round(fs * 1.4);
+    glCnv.width  = W;
+    glCnv.height = H;
+    glCnv.style.width  = W  + 'px';
+    glCnv.style.height = H + 'px';
+    nameEl.style.visibility = 'hidden';
   }
-  tick();
+  resize();
+  window.addEventListener('resize', function(){ resize(); buildTitleGrains(); });
+
+  const gl = glCnv.getContext('webgl',{alpha:true,premultipliedAlpha:false,antialias:false})
+          || glCnv.getContext('experimental-webgl',{alpha:true,premultipliedAlpha:false});
+  if(!gl) return;
+
+  const VERT = `
+precision mediump float;
+attribute vec2  aPos;
+attribute float aType;
+attribute float aPhase;
+attribute float aScroll;
+attribute float aBright;
+uniform vec2  uRes;
+uniform vec2  uMouse;
+uniform float uWarp;
+uniform float uTime;
+uniform vec2  uTrailPos[48];
+uniform float uTrailAge[48];
+varying float vBright;
+varying float vAlpha;
+
+float waveVal(float type,float t,float scroll,float freq,float phase,float amp){
+  float x=mod(t*freq+scroll,1.0), a=x*6.2832+phase;
+  if(type<1.0) return amp*sin(a);
+  if(type<2.0) return amp*clamp(sin(a)*4.0,-1.,1.);
+  if(type<3.0){ float s=2.0*mod(x,1.0)-1.0; return amp*(s*0.7+sin(a*0.5)*0.3); }
+  if(type<4.0){ return amp*(sin(x*31.7+phase)*0.5+sin(x*17.3+phase*1.3)*0.3+sin(x*53.1+phase*0.7)*0.2); }
+  float p=mod(x+1.0,1.0); return amp*exp(-p*12.0)*sin(p*40.0+phase);
+}
+
+void main(){
+  float scroll=mod(aScroll+uTime*0.002,1.0);
+  float t=aPos.x/uRes.x, freq=0.6+t*3.5;
+
+  vec2  delta=aPos-uMouse;
+  float dist=length(delta*vec2(1.0,uRes.x/uRes.y));
+  float radius=uRes.x*(0.07+0.13*uWarp);
+  float inf=clamp(1.0-dist/radius,0.0,1.0);
+  inf=inf*inf*(3.0-2.0*inf); inf=inf*inf;
+
+  float trailInf=0.0; vec2 trailDir=vec2(0.0);
+  for(int i=0;i<48;i++){
+    vec2 td=aPos-uTrailPos[i];
+    float td2=length(td*vec2(1.0,uRes.x/uRes.y));
+    float age=uTrailAge[i];
+    float tr=uRes.x*(0.04+0.08*(1.0-age));
+    float ti=clamp(1.0-td2/max(tr,0.001),0.0,1.0);
+    ti=ti*ti;
+    float ds=0.5+age*1.5;
+    trailInf+=ti*ds*(1.0-age*0.6);
+    if(td2<tr) trailDir+=normalize(td+vec2(0.001))*ti*ds;
+  }
+  trailInf=clamp(trailInf,0.0,3.0);
+
+  float amp=1.5+65.0*inf*uWarp+trailInf*8.0;
+  float wy=waveVal(aType,t,scroll,freq,aPhase,amp);
+  float wx=waveVal(mod(aType+2.0,5.0),1.0-t,scroll*0.7+0.3,0.4+(1.0-t)*2.8,aPhase+1.57,amp*0.35);
+  float lensR=uRes.x*0.09*uWarp;
+  float lensInf=clamp(1.0-dist/max(lensR,0.001),0.0,1.0); lensInf=lensInf*lensInf;
+  vec2 lensShift=-delta*lensInf*0.25*uWarp;
+  vec2 trailShift=normalize(trailDir+vec2(0.001))*trailInf*4.0;
+
+  float tiltX=sign(delta.y)*inf*12.0*uWarp;
+  float tiltY=sign(delta.x)*inf*8.0*uWarp;
+  vec2 p=aPos+vec2(wx+tiltX,-wy+tiltY)+lensShift+trailShift;
+  vec2 clip=(p/uRes)*2.0-1.0; clip.y=-clip.y;
+  gl_Position=vec4(clip,0.0,1.0);
+  gl_PointSize=2.0;
+  vBright=aBright; vAlpha=0.88+clamp(trailInf*0.1,0.0,0.12);
+}`;
+
+  const FRAG=`
+precision mediump float;
+varying float vBright; varying float vAlpha;
+void main(){
+  vec2 c=gl_PointCoord-0.5; if(dot(c,c)>0.25) discard;
+  gl_FragColor=vec4(vec3(vBright),vAlpha);
+}`;
+
+  function mkS(type,src){
+    const s=gl.createShader(type); gl.shaderSource(s,src); gl.compileShader(s);
+    if(!gl.getShaderParameter(s,gl.COMPILE_STATUS)) console.error('title shader:',gl.getShaderInfoLog(s));
+    return s;
+  }
+  const prog=gl.createProgram();
+  gl.attachShader(prog,mkS(gl.VERTEX_SHADER,VERT));
+  gl.attachShader(prog,mkS(gl.FRAGMENT_SHADER,FRAG));
+  gl.linkProgram(prog);
+
+  const aPos=gl.getAttribLocation(prog,'aPos'), aType=gl.getAttribLocation(prog,'aType');
+  const aPhase=gl.getAttribLocation(prog,'aPhase'), aScroll=gl.getAttribLocation(prog,'aScroll');
+  const aBright=gl.getAttribLocation(prog,'aBright');
+  const uRes=gl.getUniformLocation(prog,'uRes'), uMouse=gl.getUniformLocation(prog,'uMouse');
+  const uWarp=gl.getUniformLocation(prog,'uWarp'), uTime=gl.getUniformLocation(prog,'uTime');
+  const uTrailPos=gl.getUniformLocation(prog,'uTrailPos[0]');
+  const uTrailAge=gl.getUniformLocation(prog,'uTrailAge[0]');
+
+  let buf=null, nPts=0;
+
+  function buildTitleGrains(){
+    const tmp=document.createElement('canvas');
+    tmp.width=W; tmp.height=H;
+    const ctx=tmp.getContext('2d');
+    ctx.fillStyle='#000'; ctx.fillRect(0,0,W,H);
+    ctx.fillStyle='#fff';
+    ctx.font=`200 ${fs}px 'Barlow Condensed',Arial Narrow,sans-serif`;
+    ctx.textBaseline='alphabetic';
+    ctx.fillText('ANDRÉ DAMIÃO', 0, fs*0.88);
+    const pix=ctx.getImageData(0,0,W,H).data;
+    const pts=[], TG=2, si=0;
+    for(let j=0;j<H;j+=TG){
+      for(let i=0;i<W;i+=TG){
+        const idx=(j*W+i)*4;
+        if(pix[idx]>60){
+          pts.push(i,j, (pts.length/6)%5, Math.random()*6.28, Math.random(), 0.94);
+        }
+      }
+    }
+    nPts=pts.length/6;
+    if(nPts===0) return;
+    if(buf) gl.deleteBuffer(buf);
+    buf=gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER,buf);
+    gl.bufferData(gl.ARRAY_BUFFER,new Float32Array(pts),gl.STATIC_DRAW);
+  }
+  buildTitleGrains();
+
+  // Share trail from main canvas
+  const TRAIL_LEN=48;
+  const tX=new Float32Array(TRAIL_LEN), tY=new Float32Array(TRAIL_LEN);
+  const tAge=new Float32Array(TRAIL_LEN).fill(1.0); // start aged out
+  let tHead=0;
+  window._titleTrail={push:function(x,y){
+    tX[tHead]=x; tY[tHead]=y; tAge[tHead]=0.0;
+    tHead=(tHead+1)%TRAIL_LEN;
+  }};
+
+  let mx=W/2,my=H/2,warpAmt=0,warpTarget=0,frame=0;
+  gl.enable(gl.BLEND); gl.blendFunc(gl.SRC_ALPHA,gl.ONE_MINUS_SRC_ALPHA);
+
+  function render(){
+    requestAnimationFrame(render);
+    if(!buf) return;
+    frame++;
+    for(let i=0;i<TRAIL_LEN;i++) tAge[i]=Math.min(1.0,tAge[i]+0.012);
+    warpAmt+=(warpTarget-warpAmt)*0.10;
+
+    gl.viewport(0,0,W,H);
+    gl.clearColor(0,0,0,0); gl.clear(gl.COLOR_BUFFER_BIT);
+    gl.useProgram(prog);
+
+    const tf=new Float32Array(TRAIL_LEN*2);
+    for(let i=0;i<TRAIL_LEN;i++){tf[i*2]=tX[i];tf[i*2+1]=tY[i];}
+    gl.uniform2fv(uTrailPos,tf); gl.uniform1fv(uTrailAge,tAge);
+    gl.uniform2f(uRes,W,H); gl.uniform2f(uMouse,mx,my);
+    gl.uniform1f(uWarp,warpAmt); gl.uniform1f(uTime,frame);
+
+    gl.bindBuffer(gl.ARRAY_BUFFER,buf);
+    const ST=6*4;
+    gl.enableVertexAttribArray(aPos);    gl.vertexAttribPointer(aPos,   2,gl.FLOAT,false,ST,0);
+    gl.enableVertexAttribArray(aType);   gl.vertexAttribPointer(aType,  1,gl.FLOAT,false,ST,8);
+    gl.enableVertexAttribArray(aPhase);  gl.vertexAttribPointer(aPhase, 1,gl.FLOAT,false,ST,12);
+    gl.enableVertexAttribArray(aScroll); gl.vertexAttribPointer(aScroll,1,gl.FLOAT,false,ST,16);
+    gl.enableVertexAttribArray(aBright); gl.vertexAttribPointer(aBright,1,gl.FLOAT,false,ST,20);
+    gl.drawArrays(gl.POINTS,0,nPts);
+  }
+  render();
+
+  // Pointer events on header
+  header.style.touchAction='none';
+  function onMove(e){
+    const r=header.getBoundingClientRect();
+    mx=(e.clientX-r.left); my=(e.clientY-r.top);
+    warpTarget=1;
+    if(window._titleTrail) window._titleTrail.push(mx,my);
+  }
+  header.addEventListener('pointermove',onMove);
+  header.addEventListener('pointerdown',function(e){header.setPointerCapture(e.pointerId);onMove(e);});
+  header.addEventListener('pointerleave',function(){warpTarget=0;});
+  header.addEventListener('pointerup',function(e){if(e.pointerType==='touch')warpTarget=0;});
 })();
 </script>
-
 </body>
 </html>
