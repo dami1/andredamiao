@@ -395,101 +395,131 @@ canvas, img, svg, rect {
 <script src="https://cdn.jsdelivr.net/npm/p5@1.9.0/lib/p5.min.js"></script>
 
 <script>
-// ── P5 CAROUSEL ──────────────────────────────────────────
+// ── WEBGL CAROUSEL — GPU shader approach ─────────────────
+// One sketch, one canvas, shaders do the heavy lifting
 new p5(function(sk) {
-
-  // ── shared wave functions (same as title) ──
-  function waveVal(type, t, scroll, freq, phase, amp, noise) {
-    const x = (t * freq + scroll) % 1;
-    const a = x * Math.PI * 2 + phase;
-    switch(type) {
-      case 0: return amp * Math.sin(a);
-      case 1: return amp * Math.max(-1, Math.min(1, Math.sin(a) * 3.5));
-      case 2: return amp * (2 * (x % 1) - 1);
-      case 3: {
-        if (!noise) return 0;
-        const pos = ((x + 1) % 1) * (noise.length - 1);
-        const i0  = Math.floor(pos) % noise.length;
-        const i1  = (i0 + 1) % noise.length;
-        return amp * (noise[i0] * (1-(pos%1)) + noise[i1] * (pos%1));
-      }
-      case 4: {
-        const p = ((x%1)+1)%1;
-        return amp * (p < 0.08 ? 1 : p < 0.16 ? -0.3 : 0);
-      }
-    }
-    return 0;
-  }
-
-  function makeNoise(npts) {
-    const freqs  = [1.3, 2.7, 5.1, 8.9];
-    const phases = freqs.map(() => Math.random() * Math.PI * 2);
-    const amps   = [0.45, 0.28, 0.17, 0.10];
-    const arr = [];
-    for (let k = 0; k <= npts; k++) {
-      const t = k / npts;
-      let v = 0;
-      freqs.forEach((f, i) => { v += amps[i] * Math.sin(t * Math.PI * 2 * f + phases[i]); });
-      arr.push(v);
-    }
-    return arr;
-  }
 
   var imgFiles = [], captions = [], imgs = [], N = 0, loaded = 0;
   var W, H;
-  var pos = 0;                  // scroll px
+  var pos = 0;
   var isDragging = false, dragStartX = 0, dragPosStart = 0;
   var hover = false, mxPx = 0, myPx = 0;
-  var decompAmt = 0, decompTarget = 0;
-  var grainSets = {};           // keyed by image index
-  var srcCanvases = {};         // greyscale source per image
-  const GRAIN = 8;
+  var warpAmt = 0, warpTarget = 0;
+  var theShader;
 
-  // ── build grain array from a source canvas ──
-  function buildGrains(srcCtx, iW, iH) {
-    var pix = srcCtx.getImageData(0, 0, iW, iH).data;
-    var g = [], si = 0;
-    for (var j = 0; j < iH; j += GRAIN) {
-      for (var i = 0; i < iW; i += GRAIN) {
-        var idx = (j * iW + i) * 4;
-        var bv = (0.299*pix[idx] + 0.587*pix[idx+1] + 0.114*pix[idx+2]) / 255;
-        var bright = Math.round(Math.pow(bv, 0.78) * 255);
-        var type = si % 5, t = i / iW;
-        g.push({
-          // positions in image-space (0..iW, 0..iH)
-          px: i, py: j, bright, type, t,
-          freq:  0.6 + t * 3.5,
-          phase: Math.random() * Math.PI * 2,
-          scroll: Math.random(),
-          speed:  0.002 + Math.random() * 0.003,
-          noise:  (type === 3) ? makeNoise(80) : null,
-          amp: 0, ampTarget: 0,
-          rx: 0, rxTarget: 0,
-          ry: 0, ryTarget: 0,
-          rxDir: Math.random() > 0.5 ? 1 : -1,
-          ryDir: Math.random() > 0.5 ? 1 : -1
-        });
-        si++;
-      }
+  // ── Vertex shader — passthrough ──────────────────────────
+  var vert = `
+    attribute vec3 aPosition;
+    attribute vec2 aTexCoord;
+    varying vec2 vTexCoord;
+    void main() {
+      vTexCoord = aTexCoord;
+      gl_Position = vec4(aPosition, 1.0);
     }
-    return g;
-  }
+  `;
 
-  // ── ensure grain set exists for image idx ──
-  function ensureGrains(idx) {
-    if (grainSets[idx]) return;
-    var img = imgs[idx];
-    if (!img) return;
-    // Draw image to temp canvas to read pixels
-    var tmp = document.createElement('canvas');
-    tmp.width = img.width; tmp.height = img.height;
-    var ctx = tmp.getContext('2d');
-    ctx.filter = 'grayscale(100%) contrast(2) brightness(0.85)';
-    ctx.drawImage(img.canvas || img.elt || img, 0, 0);
-    ctx.filter = 'none';
-    srcCanvases[idx] = { ctx, w: tmp.width, h: tmp.height };
-    grainSets[idx] = buildGrains(ctx, tmp.width, tmp.height);
-  }
+  // ── Fragment shader — greyscale + warp dots ───────────────
+  // The shader renders one image tile.
+  // Warp: sine/noise displacement field around mouse position.
+  // Dots: sample grid, each dot displaced by the field.
+  var frag = `
+    precision mediump float;
+    uniform sampler2D uTex;
+    uniform vec2      uMouse;    // mouse 0-1
+    uniform float     uWarp;    // 0=off 1=full
+    uniform float     uTime;
+    uniform vec2      uRes;
+    varying vec2      vTexCoord;
+
+    float hash(vec2 p) {
+      return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
+    }
+
+    float noise(vec2 p) {
+      vec2 i = floor(p);
+      vec2 f = fract(p);
+      f = f*f*(3.0-2.0*f);
+      float a = hash(i);
+      float b = hash(i+vec2(1,0));
+      float c = hash(i+vec2(0,1));
+      float d = hash(i+vec2(1,1));
+      return mix(mix(a,b,f.x), mix(c,d,f.x), f.y);
+    }
+
+    void main() {
+      vec2 uv = vTexCoord;
+
+      // Greyscale base image sample
+      vec3 col = texture2D(uTex, uv).rgb;
+      float grey = dot(col, vec3(0.299, 0.587, 0.114));
+      // Boost contrast
+      grey = clamp((grey - 0.4) * 1.6 + 0.4, 0.0, 1.0);
+
+      if (uWarp < 0.01) {
+        gl_FragColor = vec4(vec3(grey), 1.0);
+        return;
+      }
+
+      // Distance from mouse
+      vec2 delta = uv - uMouse;
+      float dist = length(delta * vec2(uRes.x/uRes.y, 1.0));
+      float radius = 0.35 * uWarp;
+      float inf = max(0.0, 1.0 - dist / radius);
+      inf = inf * inf; // smooth falloff
+
+      // Grid of dots — GRAIN=8px in uv space
+      vec2 grain = vec2(8.0) / uRes;
+      vec2 cell = floor(uv / grain);
+      vec2 cellUV = fract(uv / grain); // 0-1 within cell
+
+      // Dot position in the cell
+      float dotR = 0.25; // dot fills 25% of cell
+      vec2 dotCenter = vec2(0.5);
+      float dotDist = length(cellUV - dotCenter);
+      if (dotDist > dotR) {
+        // Between dots — transparent → show base image
+        gl_FragColor = vec4(vec3(grey), 1.0);
+        return;
+      }
+
+      // Sample brightness at cell center
+      vec2 sampleUV = (cell + 0.5) * grain;
+
+      // Warp displacement: sine + noise wave
+      float t = cell.x / (uRes.x / 8.0); // 0-1 horizontal position
+      float scroll = uTime * 0.002 + hash(cell) * 6.28;
+      float waveType = mod(cell.y, 5.0);
+      float amp = inf * 55.0 / uRes.y * uWarp;
+      float wy = 0.0;
+      if (waveType < 1.0) {
+        wy = amp * sin(t * 6.28 * 2.0 + scroll);
+      } else if (waveType < 2.0) {
+        wy = amp * clamp(sin(t * 6.28 * 2.0 + scroll) * 3.5, -1.0, 1.0);
+      } else if (waveType < 3.0) {
+        wy = amp * (2.0 * fract(t * 2.0 + scroll * 0.3) - 1.0);
+      } else if (waveType < 4.0) {
+        wy = amp * (noise(vec2(t * 8.0 + scroll, cell.y * 0.3)) * 2.0 - 1.0);
+      } else {
+        float ph = fract(t * 2.0 + scroll * 0.2);
+        wy = amp * (ph < 0.08 ? 1.0 : ph < 0.16 ? -0.3 : 0.0);
+      }
+
+      // Tilt: 3D effect — shift sample UV based on mouse direction
+      vec2 tiltDir = normalize(delta + vec2(0.001));
+      float tiltAmt = inf * 0.015 * uWarp;
+      sampleUV += tiltDir * tiltAmt;
+      sampleUV.y += wy;
+      sampleUV = clamp(sampleUV, vec2(0.0), vec2(1.0));
+
+      vec3 dotCol = texture2D(uTex, sampleUV).rgb;
+      float dotGrey = dot(dotCol, vec3(0.299, 0.587, 0.114));
+      dotGrey = clamp((dotGrey - 0.4) * 1.6 + 0.4, 0.0, 1.0);
+
+      // Smooth dot edge
+      float alpha = smoothstep(dotR, dotR - 0.05, dotDist);
+      gl_FragColor = vec4(vec3(dotGrey) * alpha + vec3(grey) * (1.0-alpha), 1.0);
+    }
+  `;
 
   sk.preload = function() {
     sk.loadJSON('imagens/imagens.json?v=' + Date.now(), function(data) {
@@ -509,38 +539,38 @@ new p5(function(sk) {
     var wrap = document.getElementById('csOuter');
     W = wrap.offsetWidth;
     H = wrap.offsetHeight || Math.round(window.innerHeight * 0.7);
-    var cnv = sk.createCanvas(W, H);
+    var cnv = sk.createCanvas(W, H, sk.WEBGL);
     cnv.parent('csOuter');
     cnv.elt.style.cssText = 'display:block;position:absolute;inset:0;';
     sk.pixelDensity(1);
-    sk.frameRate(20);
+    sk.frameRate(30);
     sk.noStroke();
-    sk.imageMode(sk.CORNER);
 
-    // pointer events
+    theShader = sk.createShader(vert, frag);
+
     cnv.elt.style.touchAction = 'none';
     cnv.elt.addEventListener('pointerdown', function(e) {
       cnv.elt.setPointerCapture(e.pointerId);
       isDragging = true; dragStartX = e.clientX; dragPosStart = pos;
-      hover = true; decompTarget = 1;
       var r = cnv.elt.getBoundingClientRect();
       mxPx = e.clientX - r.left; myPx = e.clientY - r.top;
+      hover = true; warpTarget = 1;
     });
     cnv.elt.addEventListener('pointermove', function(e) {
       var r = cnv.elt.getBoundingClientRect();
       mxPx = e.clientX - r.left; myPx = e.clientY - r.top;
-      hover = true; decompTarget = 1;
+      hover = true; warpTarget = 1;
       if (isDragging) pos = dragPosStart + (dragStartX - e.clientX);
     });
     cnv.elt.addEventListener('pointerup', function(e) {
       isDragging = false;
-      if (e.pointerType === 'touch') { hover = false; decompTarget = 0; }
+      if (e.pointerType === 'touch') { hover = false; warpTarget = 0; }
     });
     cnv.elt.addEventListener('pointerleave', function() {
-      isDragging = false; hover = false; decompTarget = 0;
+      isDragging = false; hover = false; warpTarget = 0;
     });
     cnv.elt.addEventListener('pointercancel', function() {
-      isDragging = false; hover = false; decompTarget = 0;
+      isDragging = false; hover = false; warpTarget = 0;
     });
     document.addEventListener('keydown', function(e) {
       if (e.key === 'ArrowRight') pos += W;
@@ -551,88 +581,48 @@ new p5(function(sk) {
   sk.draw = function() {
     if (loaded < N || N === 0) { sk.background(8); return; }
 
-    // auto-scroll — faster
     if (!isDragging) pos += 0.8;
-
-    // wrap
     var total = W * N;
     pos = ((pos % total) + total) % total;
-
-    decompAmt += (decompTarget - decompAmt) * 0.12;
+    warpAmt += (warpTarget - warpAmt) * 0.08;
 
     sk.background(8);
 
-    // draw two rounds to handle wrap-around
+    // Draw each visible image via shader
     for (var pass = 0; pass < 2; pass++) {
       for (var n = 0; n < N; n++) {
         var imgX = n * W - pos + pass * total;
         if (imgX + W < 0 || imgX > W) continue;
-
         var img = imgs[n];
         if (!img) continue;
-
-        // base image in greyscale
-        sk.push();
-        sk.drawingContext.filter = 'grayscale(100%) contrast(1.2)';
-        sk.image(img, imgX, 0, W, H);
-        sk.drawingContext.filter = 'none';
-        sk.pop();
-
-        // pixel layer — only the visible slide, only when hovering
-        if (decompAmt > 0.01) {
-          ensureGrains(n);
-          if (grainSets[n]) drawGrains(n, imgX);
-        }
+        drawImageShader(img, imgX);
       }
     }
   };
 
-  function drawGrains(idx, imgX) {
-    var src = srcCanvases[idx];
-    var grains = grainSets[idx];
-    if (!grains || !src) return;
+  function drawImageShader(img, imgX) {
+    // Normalise mouse to 0-1 within the current image
+    var mxImg = (mxPx - imgX) / W;
+    var myImg = 1.0 - myPx / H;  // flip Y for GLSL
 
-    var scaleX = W / src.w;
-    var scaleY = H / src.h;
-    var RX = W * 0.35, RY = H * 0.35;
-    var MAX_AMP = 55, MAX_TILT = 0.5;
+    sk.shader(theShader);
+    theShader.setUniform('uTex',   img);
+    theShader.setUniform('uMouse', [mxImg, myImg]);
+    theShader.setUniform('uWarp',  warpAmt);
+    theShader.setUniform('uTime',  sk.frameCount);
+    theShader.setUniform('uRes',   [W, H]);
 
-    for (var i = 0; i < grains.length; i++) {
-      var g = grains[i];
-      // canvas position of this grain
-      var gx = imgX + g.px * scaleX;
-      var gy = g.py * scaleY;
+    // Draw a quad covering imgX..imgX+W, 0..H
+    // In WEBGL the canvas goes -W/2..W/2, -H/2..H/2
+    var x1 = (imgX / W) * 2.0 - 1.0;
+    var x2 = ((imgX + W) / W) * 2.0 - 1.0;
 
-      var dx = hover ? Math.abs(mxPx - gx) : 9999;
-      var dy = hover ? Math.abs(myPx - gy) : 9999;
-      var near = dx < RX && dy < RY;
-
-      if (near || g.amp > 0.3 || Math.abs(g.rx) > 0.01) {
-        g.scroll = (g.scroll + g.speed) % 1;
-        if (near) {
-          var ix = Math.max(0, 1-dx/RX), iy = Math.max(0, 1-dy/RY);
-          var inf = ix * iy;
-          g.ampTarget = inf * MAX_AMP * decompAmt;
-          var signX = (myPx > gy) ? 1 : -1;
-          var signY = (mxPx > gx) ? 1 : -1;
-          g.rxTarget = signX * inf * MAX_TILT * decompAmt;
-          g.ryTarget = signY * inf * MAX_TILT * decompAmt;
-        } else {
-          g.ampTarget = 0; g.rxTarget = 0; g.ryTarget = 0;
-        }
-        g.amp += (g.ampTarget - g.amp) * 0.18;
-        g.rx  += (g.rxTarget - g.rx) * 0.15;
-        g.ry  += (g.ryTarget - g.ry) * 0.15;
-      } else {
-        g.rx *= 0.9; g.ry *= 0.9;
-        if (g.amp < 0.05) continue; // skip completely flat grains
-      }
-
-      var wy = waveVal(g.type, g.t, g.scroll, g.freq, g.phase, g.amp, g.noise);
-      var v = g.bright;
-      sk.fill(v, v, v, 200);
-      sk.circle(gx, gy - wy, 2);
-    }
+    sk.beginShape();
+    sk.vertex(x1, -1, 0, 0, 0);
+    sk.vertex(x2, -1, 0, 1, 0);
+    sk.vertex(x2,  1, 0, 1, 1);
+    sk.vertex(x1,  1, 0, 0, 1);
+    sk.endShape(sk.CLOSE);
   }
 
   sk.windowResized = function() {
@@ -641,7 +631,6 @@ new p5(function(sk) {
     W = wrap.offsetWidth;
     H = wrap.offsetHeight;
     sk.resizeCanvas(W, H);
-    grainSets = {}; srcCanvases = {}; // rebuild at new size
   };
 
 });
