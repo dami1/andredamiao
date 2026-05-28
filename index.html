@@ -395,242 +395,339 @@ canvas, img, svg, rect {
 <script src="https://cdn.jsdelivr.net/npm/p5@1.9.0/lib/p5.min.js"></script>
 
 <script>
-// ── WEBGL CAROUSEL — GPU shader approach ─────────────────
-// One sketch, one canvas, shaders do the heavy lifting
+// ── P5 CAROUSEL ──────────────────────────────────────────
 new p5(function(sk) {
 
-  var imgFiles = [], captions = [], imgs = [], N = 0, loaded = 0;
-  var W, H;
-  var pos = 0;
-  var isDragging = false, dragStartX = 0, dragPosStart = 0;
-  var hover = false, mxPx = 0, myPx = 0;
-  var warpAmt = 0, warpTarget = 0;
-  var theShader;
+  var imgFiles=[], captions=[], imgs=[], N=0, loaded=0;
+  var W, H, ITEM_W;
+  var pos=0;
+  var isDragging=false, dragStartX=0, dragPosStart=0;
+  var hover=false, mxPx=0, myPx=0;
+  var warpAmt=0, warpTarget=0;
 
-  // ── Vertex shader — passthrough ──────────────────────────
-  var vert = `
-    attribute vec3 aPosition;
-    attribute vec2 aTexCoord;
-    varying vec2 vTexCoord;
-    void main() {
-      vTexCoord = aTexCoord;
-      gl_Position = vec4(aPosition, 1.0);
-    }
-  `;
+  // Per-image grain data
+  var grainSets={};
+  var GRAIN=7; // px between dots — balance density vs perf
 
-  // ── Fragment shader — greyscale + warp dots ───────────────
-  // The shader renders one image tile.
-  // Warp: sine/noise displacement field around mouse position.
-  // Dots: sample grid, each dot displaced by the field.
-  var frag = `
-    precision mediump float;
-    uniform sampler2D uTex;
-    uniform vec2      uMouse;    // mouse 0-1
-    uniform float     uWarp;    // 0=off 1=full
-    uniform float     uTime;
-    uniform vec2      uRes;
-    varying vec2      vTexCoord;
-
-    float hash(vec2 p) {
-      return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
-    }
-
-    float noise(vec2 p) {
-      vec2 i = floor(p);
-      vec2 f = fract(p);
-      f = f*f*(3.0-2.0*f);
-      float a = hash(i);
-      float b = hash(i+vec2(1,0));
-      float c = hash(i+vec2(0,1));
-      float d = hash(i+vec2(1,1));
-      return mix(mix(a,b,f.x), mix(c,d,f.x), f.y);
-    }
-
-    void main() {
-      vec2 uv = vTexCoord;
-
-      // Greyscale base image sample
-      vec3 col = texture2D(uTex, uv).rgb;
-      float grey = dot(col, vec3(0.299, 0.587, 0.114));
-      // Boost contrast
-      grey = clamp((grey - 0.4) * 1.6 + 0.4, 0.0, 1.0);
-
-      if (uWarp < 0.01) {
-        gl_FragColor = vec4(vec3(grey), 1.0);
-        return;
+  // ── wave functions (identical to title) ──────────────────
+  function waveVal(type,t,scroll,freq,phase,amp,noise) {
+    var x=(t*freq+scroll)%1, a=x*Math.PI*2+phase;
+    switch(type) {
+      case 0: return amp*Math.sin(a);
+      case 1: return amp*Math.max(-1,Math.min(1,Math.sin(a)*3.5));
+      case 2: return amp*(2*(x%1)-1);
+      case 3: {
+        if(!noise) return 0;
+        var pos2=((x+1)%1)*(noise.length-1);
+        var i0=Math.floor(pos2)%noise.length, i1=(i0+1)%noise.length;
+        return amp*(noise[i0]*(1-(pos2%1))+noise[i1]*(pos2%1));
       }
-
-      // Distance from mouse
-      vec2 delta = uv - uMouse;
-      float dist = length(delta * vec2(uRes.x/uRes.y, 1.0));
-      float radius = 0.35 * uWarp;
-      float inf = max(0.0, 1.0 - dist / radius);
-      inf = inf * inf; // smooth falloff
-
-      // Grid of dots — GRAIN=8px in uv space
-      vec2 grain = vec2(8.0) / uRes;
-      vec2 cell = floor(uv / grain);
-      vec2 cellUV = fract(uv / grain); // 0-1 within cell
-
-      // Dot position in the cell
-      float dotR = 0.25; // dot fills 25% of cell
-      vec2 dotCenter = vec2(0.5);
-      float dotDist = length(cellUV - dotCenter);
-      if (dotDist > dotR) {
-        // Between dots — transparent → show base image
-        gl_FragColor = vec4(vec3(grey), 1.0);
-        return;
+      case 4: {
+        var p=((x%1)+1)%1;
+        return amp*(p<0.08?1:p<0.16?-0.3:0);
       }
-
-      // Sample brightness at cell center
-      vec2 sampleUV = (cell + 0.5) * grain;
-
-      // Warp displacement: sine + noise wave
-      float t = cell.x / (uRes.x / 8.0); // 0-1 horizontal position
-      float scroll = uTime * 0.002 + hash(cell) * 6.28;
-      float waveType = mod(cell.y, 5.0);
-      float amp = inf * 55.0 / uRes.y * uWarp;
-      float wy = 0.0;
-      if (waveType < 1.0) {
-        wy = amp * sin(t * 6.28 * 2.0 + scroll);
-      } else if (waveType < 2.0) {
-        wy = amp * clamp(sin(t * 6.28 * 2.0 + scroll) * 3.5, -1.0, 1.0);
-      } else if (waveType < 3.0) {
-        wy = amp * (2.0 * fract(t * 2.0 + scroll * 0.3) - 1.0);
-      } else if (waveType < 4.0) {
-        wy = amp * (noise(vec2(t * 8.0 + scroll, cell.y * 0.3)) * 2.0 - 1.0);
-      } else {
-        float ph = fract(t * 2.0 + scroll * 0.2);
-        wy = amp * (ph < 0.08 ? 1.0 : ph < 0.16 ? -0.3 : 0.0);
-      }
-
-      // Tilt: 3D effect — shift sample UV based on mouse direction
-      vec2 tiltDir = normalize(delta + vec2(0.001));
-      float tiltAmt = inf * 0.015 * uWarp;
-      sampleUV += tiltDir * tiltAmt;
-      sampleUV.y += wy;
-      sampleUV = clamp(sampleUV, vec2(0.0), vec2(1.0));
-
-      vec3 dotCol = texture2D(uTex, sampleUV).rgb;
-      float dotGrey = dot(dotCol, vec3(0.299, 0.587, 0.114));
-      dotGrey = clamp((dotGrey - 0.4) * 1.6 + 0.4, 0.0, 1.0);
-
-      // Smooth dot edge
-      float alpha = smoothstep(dotR, dotR - 0.05, dotDist);
-      gl_FragColor = vec4(vec3(dotGrey) * alpha + vec3(grey) * (1.0-alpha), 1.0);
     }
-  `;
+    return 0;
+  }
 
-  sk.preload = function() {
-    sk.loadJSON('imagens/imagens.json?v=' + Date.now(), function(data) {
-      captions = data;
-      imgFiles = data.map(function(d) { return d.arquivo; });
-      N = imgFiles.length;
-      imgFiles.forEach(function(f, i) {
-        sk.loadImage('imagens/' + f,
-          function(img) { imgs[i] = img; loaded++; },
-          function()    { loaded++; console.warn('failed:', f); }
+  function makeNoise(n) {
+    var freqs=[1.3,2.7,5.1,8.9], phases=[], amps=[0.45,0.28,0.17,0.10], arr=[];
+    freqs.forEach(function(){phases.push(Math.random()*Math.PI*2);});
+    for(var k=0;k<=n;k++){
+      var t=k/n, v=0;
+      freqs.forEach(function(f,i){v+=amps[i]*Math.sin(t*Math.PI*2*f+phases[i]);});
+      arr.push(v);
+    }
+    return arr;
+  }
+
+  // ── read pixels from a p5 image into grain array ─────────
+  function buildGrains(p5img) {
+    // Use a 2D canvas to read pixels — avoids p5 WEBGL issues
+    var tmp=document.createElement('canvas');
+    // Sample at native image size, scale coords to canvas on draw
+    var IW=Math.min(p5img.width,  800);
+    var IH=Math.min(p5img.height, 800);
+    tmp.width=IW; tmp.height=IH;
+    var ctx=tmp.getContext('2d');
+    ctx.filter='grayscale(100%) contrast(1.6) brightness(0.85)';
+    ctx.drawImage(p5img.canvas||p5img.elt, 0, 0, IW, IH);
+    ctx.filter='none';
+    var pix=ctx.getImageData(0,0,IW,IH).data;
+
+    var grains=[], si=0;
+    for(var j=0;j<IH;j+=GRAIN){
+      for(var i=0;i<IW;i+=GRAIN){
+        var idx=(j*IW+i)*4;
+        var bv=(0.299*pix[idx]+0.587*pix[idx+1]+0.114*pix[idx+2])/255;
+        var bright=Math.round(Math.pow(bv,0.78)*255);
+        var type=si%5, t=i/IW;
+        grains.push({
+          // normalised source coords 0-1
+          nx:i/IW, ny:j/IH,
+          bright, type, t,
+          freq:0.6+t*3.5,
+          phase:Math.random()*Math.PI*2,
+          scroll:Math.random(),
+          speed:0.002+Math.random()*0.003,
+          noise:(type===3)?makeNoise(80):null,
+          amp:0, ampTarget:0,
+          rx:0, rxTarget:0, ry:0, ryTarget:0,
+          rxDir:Math.random()>0.5?1:-1,
+          ryDir:Math.random()>0.5?1:-1
+        });
+        si++;
+      }
+    }
+    return grains;
+  }
+
+  // ── lens distortion (fish-eye) ────────────────────────────
+  // One shared lens canvas floats over the p5 canvas
+  var lensCanvas, lctx, lensSourceCtxs={};
+  var lmx=0, lmy=0, lstr=0, lstrT=0;
+  var lPrevX=-999, lPrevY=-999, lPrevR=0;
+  var lFrame=0;
+  var L_R=130, L_STR=0.55;
+
+  function buildLensSource(idx) {
+    if(lensSourceCtxs[idx]) return;
+    var img=imgs[idx];
+    if(!img) return;
+    var tmp=document.createElement('canvas');
+    tmp.width=W; tmp.height=H;
+    var ctx=tmp.getContext('2d');
+    ctx.filter='grayscale(100%) contrast(1.6) brightness(0.85)';
+    ctx.drawImage(img.canvas||img.elt, 0, 0, W, H);
+    ctx.filter='none';
+    lensSourceCtxs[idx]={ctx,w:W,h:H};
+  }
+
+  function lensRender() {
+    lstr+=(lstrT-lstr)*0.10;
+    lFrame++;
+    if(lFrame%2!==0){requestAnimationFrame(lensRender);return;}
+    var r=L_R*lstr;
+    if(lPrevR>0) lctx.clearRect(lPrevX-lPrevR-1,lPrevY-lPrevR-1,lPrevR*2+2,lPrevR*2+2);
+    if(lstr<0.02){lPrevR=0;requestAnimationFrame(lensRender);return;}
+
+    // figure out which image is under the mouse
+    var total=ITEM_W*N;
+    var normPos=((pos%total)+total)%total;
+    var imgIdx=-1, imgOffX=0;
+    for(var pass=0;pass<2;pass++){
+      for(var n=0;n<N;n++){
+        var x0=n*ITEM_W-normPos+pass*total;
+        if(lmx>=x0&&lmx<x0+ITEM_W){imgIdx=n;imgOffX=x0;break;}
+      }
+      if(imgIdx>=0)break;
+    }
+    if(imgIdx<0){requestAnimationFrame(lensRender);return;}
+    buildLensSource(imgIdx);
+    var src=lensSourceCtxs[imgIdx];
+    if(!src){requestAnimationFrame(lensRender);return;}
+
+    // map canvas mouse coords to source image coords
+    var srcMx=Math.round((lmx-imgOffX)/ITEM_W*src.w);
+    var srcMy=Math.round(lmy/H*src.h);
+
+    var margin=Math.ceil(r*0.5);
+    var sx0=Math.max(0,Math.floor(srcMx-r-margin));
+    var sy0=Math.max(0,Math.floor(srcMy-r-margin));
+    var sx1=Math.min(src.w,Math.ceil(srcMx+r+margin));
+    var sy1=Math.min(src.h,Math.ceil(srcMy+r+margin));
+    var sd=src.ctx.getImageData(sx0,sy0,sx1-sx0,sy1-sy0);
+
+    var ox0=Math.max(0,Math.floor(lmx-r));
+    var oy0=Math.max(0,Math.floor(lmy-r));
+    var ox1=Math.min(W,Math.ceil(lmx+r));
+    var oy1=Math.min(H,Math.ceil(lmy+r));
+    var ow=ox1-ox0, oh=oy1-oy0;
+    if(ow<1||oh<1){requestAnimationFrame(lensRender);return;}
+
+    var od=lctx.createImageData(ow,oh);
+    var scaleX=src.w/ITEM_W, scaleY=src.h/H;
+
+    for(var oy=0;oy<oh;oy++){
+      for(var ox=0;ox<ow;ox++){
+        var wx=ox0+ox-lmx, wy2=oy0+oy-lmy;
+        var d=Math.sqrt(wx*wx+wy2*wy2);
+        if(d>r) continue;
+        var edge=Math.max(0,1-d/r);
+        var s=L_STR*lstr*edge*edge;
+        var nr=d/r, warp=nr-s*nr*(1-nr);
+        var scale2=d>0.5?warp/nr:(1-s);
+        var csx=Math.round((lmx+wx*scale2-imgOffX)*scaleX);
+        var csy=Math.round((lmy+wy2*scale2)*scaleY);
+        csx=Math.max(sx0,Math.min(sx1-1,csx));
+        csy=Math.max(sy0,Math.min(sy1-1,csy));
+        var si2=((csy-sy0)*(sx1-sx0)+(csx-sx0))*4;
+        var di=(oy*ow+ox)*4;
+        if(si2>=0&&si2+3<sd.data.length){
+          od.data[di]=sd.data[si2];od.data[di+1]=sd.data[si2+1];
+          od.data[di+2]=sd.data[si2+2];od.data[di+3]=Math.round(edge*255);
+        }
+      }
+    }
+    lctx.putImageData(od,ox0,oy0);
+    lPrevX=lmx;lPrevY=lmy;lPrevR=Math.ceil(r)+1;
+    requestAnimationFrame(lensRender);
+  }
+
+  sk.preload=function(){
+    sk.loadJSON('imagens/imagens.json?v='+Date.now(),function(data){
+      captions=data;
+      imgFiles=data.map(function(d){return d.arquivo;});
+      N=imgFiles.length;
+      imgFiles.forEach(function(f,i){
+        sk.loadImage('imagens/'+f,
+          function(img){imgs[i]=img;loaded++;},
+          function(){loaded++;console.warn('failed:',f);}
         );
       });
     });
   };
 
-  sk.setup = function() {
-    var wrap = document.getElementById('csOuter');
-    W = wrap.offsetWidth;
-    H = wrap.offsetHeight || Math.round(window.innerHeight * 0.7);
-    var cnv = sk.createCanvas(W, H, sk.WEBGL);
+  sk.setup=function(){
+    var wrap=document.getElementById('csOuter');
+    W=wrap.offsetWidth;
+    H=wrap.offsetHeight||Math.round(window.innerHeight*0.7);
+    ITEM_W=W;
+
+    var cnv=sk.createCanvas(W,H);
     cnv.parent('csOuter');
-    cnv.elt.style.cssText = 'display:block;position:absolute;inset:0;';
+    cnv.elt.style.cssText='display:block;position:absolute;inset:0;z-index:1;';
     sk.pixelDensity(1);
-    sk.frameRate(30);
+    sk.frameRate(20);
     sk.noStroke();
+    sk.imageMode(sk.CORNER);
 
-    theShader = sk.createShader(vert, frag);
+    // Lens canvas sits on TOP of p5 canvas
+    lensCanvas=document.createElement('canvas');
+    lensCanvas.width=W; lensCanvas.height=H;
+    lensCanvas.style.cssText='position:absolute;inset:0;z-index:2;pointer-events:none;width:100%;height:100%;';
+    wrap.appendChild(lensCanvas);
+    lctx=lensCanvas.getContext('2d');
+    lensRender();
 
-    cnv.elt.style.touchAction = 'none';
-    cnv.elt.addEventListener('pointerdown', function(e) {
+    cnv.elt.style.touchAction='none';
+    cnv.elt.addEventListener('pointerdown',function(e){
       cnv.elt.setPointerCapture(e.pointerId);
-      isDragging = true; dragStartX = e.clientX; dragPosStart = pos;
-      var r = cnv.elt.getBoundingClientRect();
-      mxPx = e.clientX - r.left; myPx = e.clientY - r.top;
-      hover = true; warpTarget = 1;
+      isDragging=true;dragStartX=e.clientX;dragPosStart=pos;
+      var r=cnv.elt.getBoundingClientRect();
+      mxPx=e.clientX-r.left;myPx=e.clientY-r.top;
+      lmx=mxPx;lmy=myPx;
+      hover=true;warpTarget=1;lstrT=1;
     });
-    cnv.elt.addEventListener('pointermove', function(e) {
-      var r = cnv.elt.getBoundingClientRect();
-      mxPx = e.clientX - r.left; myPx = e.clientY - r.top;
-      hover = true; warpTarget = 1;
-      if (isDragging) pos = dragPosStart + (dragStartX - e.clientX);
+    cnv.elt.addEventListener('pointermove',function(e){
+      var r=cnv.elt.getBoundingClientRect();
+      mxPx=e.clientX-r.left;myPx=e.clientY-r.top;
+      lmx=mxPx;lmy=myPx;
+      hover=true;warpTarget=1;lstrT=1;
+      if(isDragging) pos=dragPosStart+(dragStartX-e.clientX);
     });
-    cnv.elt.addEventListener('pointerup', function(e) {
-      isDragging = false;
-      if (e.pointerType === 'touch') { hover = false; warpTarget = 0; }
+    cnv.elt.addEventListener('pointerup',function(e){
+      isDragging=false;
+      if(e.pointerType==='touch'){hover=false;warpTarget=0;lstrT=0;}
     });
-    cnv.elt.addEventListener('pointerleave', function() {
-      isDragging = false; hover = false; warpTarget = 0;
+    cnv.elt.addEventListener('pointerleave',function(){
+      isDragging=false;hover=false;warpTarget=0;lstrT=0;
     });
-    cnv.elt.addEventListener('pointercancel', function() {
-      isDragging = false; hover = false; warpTarget = 0;
+    cnv.elt.addEventListener('pointercancel',function(){
+      isDragging=false;hover=false;warpTarget=0;lstrT=0;
     });
-    document.addEventListener('keydown', function(e) {
-      if (e.key === 'ArrowRight') pos += W;
-      if (e.key === 'ArrowLeft')  pos -= W;
+    document.addEventListener('keydown',function(e){
+      if(e.key==='ArrowRight') pos+=ITEM_W;
+      if(e.key==='ArrowLeft')  pos-=ITEM_W;
     });
   };
 
-  sk.draw = function() {
-    if (loaded < N || N === 0) { sk.background(8); return; }
-
-    if (!isDragging) pos += 0.8;
-    var total = W * N;
-    pos = ((pos % total) + total) % total;
-    warpAmt += (warpTarget - warpAmt) * 0.08;
-
+  sk.draw=function(){
+    if(loaded<N||N===0){sk.background(8);return;}
+    if(!isDragging) pos+=0.8;
+    var total=ITEM_W*N;
+    pos=((pos%total)+total)%total;
+    warpAmt+=(warpTarget-warpAmt)*0.10;
     sk.background(8);
 
-    // Draw each visible image via shader
-    for (var pass = 0; pass < 2; pass++) {
-      for (var n = 0; n < N; n++) {
-        var imgX = n * W - pos + pass * total;
-        if (imgX + W < 0 || imgX > W) continue;
-        var img = imgs[n];
-        if (!img) continue;
-        drawImageShader(img, imgX);
+    for(var pass=0;pass<2;pass++){
+      for(var n=0;n<N;n++){
+        var imgX=n*ITEM_W-pos+pass*total;
+        if(imgX+ITEM_W<0||imgX>W) continue;
+        var img=imgs[n];
+        if(!img) continue;
+
+        // Draw base image with greyscale via drawingContext
+        sk.push();
+        sk.drawingContext.filter='grayscale(100%) contrast(1.3)';
+        sk.image(img,imgX,0,ITEM_W,H);
+        sk.drawingContext.filter='none';
+        sk.pop();
+
+        // Draw grain layer — always visible
+        if(!grainSets[n]) grainSets[n]=buildGrains(img);
+        drawGrains(grainSets[n], imgX);
       }
     }
   };
 
-  function drawImageShader(img, imgX) {
-    // Normalise mouse to 0-1 within the current image
-    var mxImg = (mxPx - imgX) / W;
-    var myImg = 1.0 - myPx / H;  // flip Y for GLSL
+  function drawGrains(grains, imgX) {
+    var RX=W*0.38*Math.max(0.15,warpAmt+0.15);
+    var RY=H*0.38*Math.max(0.15,warpAmt+0.15);
+    var MAX_AMP=55*Math.max(0.1,warpAmt);
+    var MAX_TILT=0.45*warpAmt;
 
-    sk.shader(theShader);
-    theShader.setUniform('uTex',   img);
-    theShader.setUniform('uMouse', [mxImg, myImg]);
-    theShader.setUniform('uWarp',  warpAmt);
-    theShader.setUniform('uTime',  sk.frameCount);
-    theShader.setUniform('uRes',   [W, H]);
+    for(var i=0;i<grains.length;i++){
+      var g=grains[i];
+      // canvas position
+      var gx=imgX+g.nx*ITEM_W;
+      var gy=g.ny*H;
 
-    // Draw a quad covering imgX..imgX+W, 0..H
-    // In WEBGL the canvas goes -W/2..W/2, -H/2..H/2
-    var x1 = (imgX / W) * 2.0 - 1.0;
-    var x2 = ((imgX + W) / W) * 2.0 - 1.0;
+      var dx=hover?Math.abs(mxPx-gx):9999;
+      var dy=hover?Math.abs(myPx-gy):9999;
+      var near=(dx<RX&&dy<RY);
 
-    sk.beginShape();
-    sk.vertex(x1, -1, 0, 0, 0);
-    sk.vertex(x2, -1, 0, 1, 0);
-    sk.vertex(x2,  1, 0, 1, 1);
-    sk.vertex(x1,  1, 0, 0, 1);
-    sk.endShape(sk.CLOSE);
+      // Always scroll wave
+      g.scroll=(g.scroll+g.speed)%1;
+
+      if(near||g.amp>0.2||Math.abs(g.rx)>0.01){
+        if(near){
+          var ix=Math.max(0,1-dx/RX), iy=Math.max(0,1-dy/RY);
+          var inf=ix*iy;
+          g.ampTarget=inf*MAX_AMP;
+          g.rxTarget=(myPx>gy?1:-1)*inf*MAX_TILT;
+          g.ryTarget=(mxPx>gx?1:-1)*inf*MAX_TILT;
+        } else {
+          g.ampTarget=0;g.rxTarget=0;g.ryTarget=0;
+        }
+        g.amp+=(g.ampTarget-g.amp)*0.18;
+        g.rx+=(g.rxTarget-g.rx)*0.15;
+        g.ry+=(g.ryTarget-g.ry)*0.15;
+      } else {
+        g.rx*=0.9;g.ry*=0.9;
+      }
+
+      var wy=waveVal(g.type,g.t,g.scroll,g.freq,g.phase,g.amp,g.noise);
+      var v=g.bright;
+
+      // tilt: offset x slightly by ry (left-right tilt)
+      var tx=gx+g.ry*18;
+
+      sk.noStroke();
+      sk.fill(v,v,v,210);
+      sk.circle(tx, gy-wy, 2);
+    }
   }
 
-  sk.windowResized = function() {
-    var wrap = document.getElementById('csOuter');
-    if (!wrap) return;
-    W = wrap.offsetWidth;
-    H = wrap.offsetHeight;
-    sk.resizeCanvas(W, H);
+  sk.windowResized=function(){
+    var wrap=document.getElementById('csOuter');
+    if(!wrap) return;
+    W=wrap.offsetWidth;
+    H=wrap.offsetHeight;
+    ITEM_W=W;
+    sk.resizeCanvas(W,H);
+    if(lensCanvas){lensCanvas.width=W;lensCanvas.height=H;}
+    grainSets={};lensSourceCtxs={};
   };
 
 });
