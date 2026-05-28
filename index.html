@@ -102,7 +102,7 @@ a:visited{color:var(--fg);}
 /* HEADER */
 .site-header{
   border-bottom:2px solid var(--fg);
-  padding:18px 0 12px;
+  padding:10px 0 6px;
   position:relative;
 }
 /* p5 canvas for title glitch sits behind text */
@@ -124,11 +124,7 @@ a:visited{color:var(--fg);}
   position:relative;z-index:1;user-select:none;
   visibility:hidden;
 }
-.site-meta{
-  margin-top:10px;font-size:11px;
-  letter-spacing:0.2em;text-transform:uppercase;color:var(--dim);
-  position:relative;z-index:1;
-}
+
 
 /* NAV */
 .nav{
@@ -368,11 +364,7 @@ canvas, img, svg, rect {
 <header class="site-header" id="siteHeader">
   <div class="site-name" id="sname">ANDRÉ DAMIÃO</div>
   <canvas id="title-gl-canvas" style="position:absolute;top:0;left:0;pointer-events:none;z-index:3;"></canvas>
-  <div class="site-meta" id="site-meta"
-    data-pt="Composição &nbsp;/&nbsp; Código &nbsp;/&nbsp; Pesquisa"
-    data-en="Composition &nbsp;/&nbsp; Code &nbsp;/&nbsp; Research">
-    Composição &nbsp;/&nbsp; Código &nbsp;/&nbsp; Pesquisa
-  </div>
+  
 </header>
 
 <nav class="nav">
@@ -1125,8 +1117,8 @@ void main(){
     float tr=uRes.x*(0.04+0.08*(1.0-age));
     float ti=clamp(1.0-td2/max(tr,0.001),0.0,1.0);
     ti=ti*ti;
-    float ds=0.5+age*1.5;
-    trailInf+=ti*ds*(1.0-age*0.6);
+    float ds=2.0; // constant strong distortion
+    trailInf+=ti*ds;
     if(td2<tr) trailDir+=normalize(td+vec2(0.001))*ti*ds;
   }
   trailInf=clamp(trailInf,0.0,3.0);
@@ -1220,7 +1212,8 @@ void main(){
     requestAnimationFrame(render);
     if(!buf) return;
     frame++;
-    for(let i=0;i<TRAIL_LEN;i++) tAge[i]=Math.min(0.72,tAge[i]+0.002); // freeze at 0.72
+    // Trail age frozen — permanent distortion
+    // tAge stays at 0 = maximum distortion forever
     if(warpTarget<0.01) warpAmt=Math.max(0.3, warpAmt*0.998); else warpAmt+=(warpTarget-warpAmt)*0.10;
 
     gl.viewport(0,0,W,H);
