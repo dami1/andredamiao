@@ -594,7 +594,7 @@ void main(){
   function buildGrains(img){
     const tmp=document.createElement('canvas');
     tmp.width=W; tmp.height=H;
-    const ctx=tmp.getContext('2d');
+    const ctx=tmp.getContext('2d',{willReadFrequently:true});
     const iw=img.naturalWidth,ih=img.naturalHeight;
     const sc=Math.max(W/iw,H/ih);
     const dw=iw*sc,dh=ih*sc,dx=(W-dw)/2,dy=(H-dh)/2;
@@ -626,7 +626,7 @@ void main(){
   function buildTitle(){
     const tmp=document.createElement('canvas');
     tmp.width=W; tmp.height=H;
-    const ctx=tmp.getContext('2d');
+    const ctx=tmp.getContext('2d',{willReadFrequently:true});
     ctx.fillStyle='#000'; ctx.fillRect(0,0,W,H);
     const fs=Math.min(H*0.28, W*0.12);
     ctx.fillStyle='#fff';
@@ -636,7 +636,7 @@ void main(){
     const tw=ctx.measureText(txt).width;
     ctx.fillText(txt,(W-tw)/2, H*0.5);
     const pix=ctx.getImageData(0,0,W,H).data;
-    const TG=3; // title grain tighter for sharper text
+    const TG=1; // maximum density for crisp title
     const pts=[];
     let si=0;
     for(let j=0;j<H;j+=TG){
@@ -673,13 +673,16 @@ void main(){
 
   // ── Render loop ─────────────────────────────────────────
   let mx=W/2,my=H/2, warpAmt=0,warpTarget=0, frame=0;
+  let warpDecay=0;
   gl.enable(gl.BLEND);
   gl.blendFunc(gl.SRC_ALPHA,gl.ONE_MINUS_SRC_ALPHA);
 
   function render(){
     requestAnimationFrame(render);
     if(!imgBuf) return;
-    frame++; ageTrail(); warpAmt+=(warpTarget-warpAmt)*0.10;
+    frame++; ageTrail();
+    // Warp lingers: decays slowly after mouse leaves
+    if(warpTarget<0.01 && warpAmt>0.01) warpAmt*=0.995; else warpAmt+=(warpTarget-warpAmt)*0.10;
 
     gl.viewport(0,0,W,H);
     gl.clearColor(0,0,0,0); gl.clear(gl.COLOR_BUFFER_BIT);
@@ -713,7 +716,7 @@ void main(){
 
   function prepLens(){
     lsrc.width=W; lsrc.height=H;
-    const sctx=lsrc.getContext('2d');
+    const sctx=lsrc.getContext('2d',{willReadFrequently:true});
     const iw=bgImg.naturalWidth,ih=bgImg.naturalHeight;
     const sc=Math.max(W/iw,H/ih);
     const dw=iw*sc,dh=ih*sc,dx=(W-dw)/2,dy=(H-dh)/2;
@@ -730,7 +733,7 @@ void main(){
     const r=LR*lstr;
     lctx.clearRect(0,0,W,H);
     if(lstr<0.02){requestAnimationFrame(lensRender);return;}
-    const sctx=lsrc.getContext('2d');
+    const sctx=lsrc.getContext('2d',{willReadFrequently:true});
     const mg=Math.ceil(r*0.4);
     const x0=Math.max(0,Math.floor(lmx-r-mg)),y0=Math.max(0,Math.floor(lmy-r-mg));
     const x1=Math.min(W,Math.ceil(lmx+r+mg)), y1=Math.min(H,Math.ceil(lmy+r+mg));
@@ -771,7 +774,7 @@ void main(){
     warpTarget=1; lstrT=1;
     // Push to trail every ~30ms to avoid flooding
     const now=Date.now();
-    if(now-lastTrailPush>30){ pushTrail(mx,my); lastTrailPush=now; }
+    if(now-lastTrailPush>15){ pushTrail(mx,my); lastTrailPush=now; }
   }
   function onEnd(){ warpTarget=0; lstrT=0; }
   wrap.addEventListener('pointermove',onMove);
@@ -1141,7 +1144,7 @@ void main(){
   function buildTitleGrains(){
     const tmp=document.createElement('canvas');
     tmp.width=W; tmp.height=H;
-    const ctx=tmp.getContext('2d');
+    const ctx=tmp.getContext('2d',{willReadFrequently:true});
     ctx.fillStyle='#000'; ctx.fillRect(0,0,W,H);
     ctx.fillStyle='#fff';
     ctx.font=`200 ${fs}px 'Barlow Condensed',Arial Narrow,sans-serif`;
@@ -1182,8 +1185,8 @@ void main(){
     requestAnimationFrame(render);
     if(!buf) return;
     frame++;
-    for(let i=0;i<TRAIL_LEN;i++) tAge[i]=Math.min(1.0,tAge[i]+0.012);
-    warpAmt+=(warpTarget-warpAmt)*0.10;
+    for(let i=0;i<TRAIL_LEN;i++) tAge[i]=Math.min(1.0,tAge[i]+0.002);
+    if(warpTarget<0.01 && warpAmt>0.01) warpAmt*=0.995; else warpAmt+=(warpTarget-warpAmt)*0.10;
 
     gl.viewport(0,0,W,H);
     gl.clearColor(0,0,0,0); gl.clear(gl.COLOR_BUFFER_BIT);
