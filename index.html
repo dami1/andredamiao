@@ -73,7 +73,7 @@
 <!-- ═══════════════════════════════════ -->
 
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@200;300;700;900&family=Barlow:ital,wght@0,300;0,400;1,300&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@200;300;700;900&family=Barlow:ital,wght@0,300;0,400;1,300&family=Bebas+Neue&display=swap');
 
 *{margin:0;padding:0;box-sizing:border-box;}
 :root{
@@ -363,7 +363,7 @@ canvas, img, svg, rect {
 
 <header class="site-header" id="siteHeader">
   <div class="site-name" id="sname">ANDRÉ DAMIÃO</div>
-  <canvas id="title-gl-canvas" style="position:absolute;top:0;left:0;pointer-events:none;z-index:3;"></canvas>
+  <canvas id="title-gl-canvas"      style="position:absolute;top:0;left:0;pointer-events:none;z-index:3;"></canvas>
   
 </header>
 
@@ -452,7 +452,7 @@ void main(){
   vec2 p   = aPos + vec2(wx,-wy);
   vec2 clip= (p/uRes)*2.0-1.0; clip.y=-clip.y;
   gl_Position  = vec4(clip,0.0,1.0);
-  gl_PointSize = 2.0;
+  gl_PointSize = 1.5;
   vBright = aBright;
   vAlpha  = 0.88;
 }`;
@@ -483,7 +483,7 @@ void main(){
   const uRes=gl.getUniformLocation(prog,'uRes');
   const uTime=gl.getUniformLocation(prog,'uTime');
 
-  const GRAIN=2, STRIDE=6; // px,py,type,phase,scroll,bright
+  const GRAIN=1, STRIDE=6; // px,py,type,phase,scroll,bright — max density
   let grainData=null, nPts=0, buf=null;
   let origX=null, origY=null; // original positions for lens source
   let ready=false;
@@ -865,7 +865,7 @@ function setLang(lang) {
 
 
 <script>
-// ── TITLE WebGL SHADER — permanent distortion ─────────
+// ── TITLE WebGL — permanent distortion only ────────────
 (function(){
   const nameEl = document.getElementById('sname');
   const header = document.getElementById('siteHeader');
@@ -877,12 +877,11 @@ function setLang(lang) {
     fs = Math.min(72, Math.max(20, W * 0.07));
     H  = Math.round(fs * 1.4);
     glCnv.width  = W; glCnv.height = H;
-    glCnv.style.width = W + 'px';
-    glCnv.style.height = H + 'px';
+    glCnv.style.width = W + 'px'; glCnv.style.height = H + 'px';
     nameEl.style.visibility = 'hidden';
   }
   resize();
-  window.addEventListener('resize', function(){ resize(); buildTitleGrains(); });
+  window.addEventListener('resize', function(){ resize(); buildAll(); });
 
   const gl = glCnv.getContext('webgl',{alpha:true,premultipliedAlpha:false,antialias:false})
           || glCnv.getContext('experimental-webgl',{alpha:true,premultipliedAlpha:false});
@@ -898,8 +897,6 @@ attribute float aBright;
 uniform vec2  uRes;
 uniform float uTime;
 varying float vBright;
-varying float vAlpha;
-
 float waveVal(float type,float t,float scroll,float freq,float phase,float amp){
   float x=mod(t*freq+scroll,1.0),a=x*6.2832+phase;
   if(type<1.0) return amp*sin(a);
@@ -908,7 +905,6 @@ float waveVal(float type,float t,float scroll,float freq,float phase,float amp){
   if(type<4.0){return amp*(sin(x*31.7+phase)*0.5+sin(x*17.3+phase*1.3)*0.3+sin(x*53.1+phase*0.7)*0.2);}
   float p=mod(x+1.0,1.0);return amp*exp(-p*12.0)*sin(p*40.0+phase);
 }
-
 void main(){
   float scroll=mod(aScroll+uTime*0.002,1.0);
   float t=aPos.x/uRes.x, freq=0.6+t*3.5;
@@ -918,22 +914,19 @@ void main(){
   vec2 clip=(p/uRes)*2.0-1.0; clip.y=-clip.y;
   gl_Position=vec4(clip,0.0,1.0);
   gl_PointSize=2.0;
-  vBright=aBright; vAlpha=0.90;
+  vBright=aBright;
 }`;
 
   const FRAG = `
 precision mediump float;
-varying float vBright; varying float vAlpha;
+varying float vBright;
 void main(){
   vec2 c=gl_PointCoord-0.5; if(dot(c,c)>0.25) discard;
-  gl_FragColor=vec4(vec3(vBright),vAlpha);
+  gl_FragColor=vec4(vec3(vBright),0.90);
 }`;
 
-  function mkS(type,src){
-    const s=gl.createShader(type); gl.shaderSource(s,src); gl.compileShader(s);
-    if(!gl.getShaderParameter(s,gl.COMPILE_STATUS)) console.error('title:',gl.getShaderInfoLog(s));
-    return s;
-  }
+  function mkS(t,s){ const sh=gl.createShader(t); gl.shaderSource(sh,s); gl.compileShader(sh);
+    if(!gl.getShaderParameter(sh,gl.COMPILE_STATUS)) console.error(gl.getShaderInfoLog(sh)); return sh; }
   const prog=gl.createProgram();
   gl.attachShader(prog,mkS(gl.VERTEX_SHADER,VERT));
   gl.attachShader(prog,mkS(gl.FRAGMENT_SHADER,FRAG));
@@ -947,23 +940,21 @@ void main(){
   const STRIDE=6;
   let grainData=null, nPts=0, buf=null;
 
-  function buildTitleGrains(){
+  function buildAll(){
     const tmp=document.createElement('canvas');
     tmp.width=W; tmp.height=H;
     const ctx=tmp.getContext('2d',{willReadFrequently:true});
     ctx.fillStyle='#000'; ctx.fillRect(0,0,W,H);
-    ctx.fillStyle='#fff';
-    ctx.font=`200 ${fs}px 'Barlow Condensed',Arial Narrow,sans-serif`;
+    ctx.strokeStyle='#fff'; ctx.lineWidth=1;
+    ctx.font=`${fs}px 'Bebas Neue','Barlow Condensed',Arial Narrow,sans-serif`;
     ctx.textBaseline='alphabetic';
-    ctx.fillText('ANDRÉ DAMIÃO',0,fs*0.88);
+    ctx.strokeText('ANDRÉ DAMIÃO',0,fs*0.88);
     const pix=ctx.getImageData(0,0,W,H).data;
-    const pts=[], TG=1; let si=0;
-    for(let j=0;j<H;j+=TG){
-      for(let i=0;i<W;i+=TG){
-        const idx=(j*W+i)*4;
-        if(pix[idx]>60){
-          pts.push(i,j,si%5,Math.random()*6.28,Math.random(),0.94);
-          si++;
+    const pts=[]; let si=0;
+    for(let j=0;j<H;j++){
+      for(let i=0;i<W;i++){
+        if(pix[(j*W+i)*4]>60){
+          pts.push(i,j,si%5,Math.random()*6.28,Math.random(),0.94); si++;
         }
       }
     }
@@ -973,23 +964,19 @@ void main(){
     buf=gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER,buf);
     gl.bufferData(gl.ARRAY_BUFFER,grainData,gl.DYNAMIC_DRAW);
   }
-  buildTitleGrains();
+  buildAll();
 
-  // Permanent distortion — same approach as image shader
   const RX=0.40, RY=0.90;
   function applyDistortion(mxPx,myPx,strength){
-    const rx=W*RX, ry=H*RY;
-    const MAX_NUDGE=3.0*strength;
+    const rx=W*RX, ry=H*RY, MAX_NUDGE=3.0*strength;
     let dMin=nPts, dMax=-1;
     for(let si=0;si<nPts;si++){
       const k=si*STRIDE;
       const dx=grainData[k]-mxPx, dy=grainData[k+1]-myPx;
-      const distX=Math.abs(dx)/rx, distY=Math.abs(dy)/ry;
-      if(distX>1||distY>1) continue;
-      const inf=(1-distX)*(1-distY);
+      if(Math.abs(dx)>rx||Math.abs(dy)>ry) continue;
+      const inf=(1-Math.abs(dx)/rx)*(1-Math.abs(dy)/ry);
       if(inf<0.01) continue;
-      const angle=Math.atan2(dy,dx);
-      const nudge=inf*MAX_NUDGE;
+      const angle=Math.atan2(dy,dx), nudge=inf*MAX_NUDGE;
       grainData[k]   +=Math.cos(angle+Math.PI)*nudge+Math.sin(angle)*nudge*0.4;
       grainData[k+1] +=Math.sin(angle+Math.PI)*nudge+Math.cos(angle)*nudge*0.4;
       if(si<dMin) dMin=si; if(si>dMax) dMax=si;
@@ -1009,7 +996,6 @@ void main(){
     frame++;
     warpAmt+=(warpTarget-warpAmt)*0.12;
     if(hover && warpAmt>0.05) applyDistortion(mxPx,myPx,warpAmt);
-
     gl.viewport(0,0,W,H);
     gl.clearColor(0,0,0,0); gl.clear(gl.COLOR_BUFFER_BIT);
     gl.useProgram(prog);
