@@ -102,7 +102,7 @@ a:visited{color:var(--fg);}
 /* HEADER */
 .site-header{
   border-bottom:2px solid var(--fg);
-  padding:10px 0 6px;
+  padding:5px 0 5px;
   position:relative;
 }
 /* p5 canvas for title glitch sits behind text */
@@ -115,14 +115,13 @@ a:visited{color:var(--fg);}
 }
 .site-name{
   font-family:'Barlow Condensed',Arial Narrow,sans-serif;
-  font-weight:200;
-  font-size:clamp(24px,7vw,92px);
-  line-height:1;letter-spacing:-0.02em;
+  font-weight:300;
+  font-size:22px;
+  line-height:1;
+  letter-spacing:0.04em;
   text-transform:uppercase;
-  white-space:normal;
-  word-break:break-word;
-  position:relative;z-index:1;user-select:none;
-  visibility:hidden;
+  color:var(--fg);
+  padding:5px 0 5px;
 }
 
 
@@ -354,6 +353,36 @@ canvas, img, svg, rect {
 
 
 
+
+/* ── DROPDOWN NAV ── */
+.nav-dropdown { position:relative; display:inline-flex; align-items:center; }
+.nav-dropdown > a { margin-right:22px; }
+.dropdown-menu {
+  display:none;
+  position:absolute;
+  top:100%;
+  left:0;
+  background:#080808;
+  border:1px solid var(--lt);
+  min-width:140px;
+  z-index:100;
+  padding:4px 0;
+}
+.dropdown-menu a {
+  display:block;
+  padding:5px 14px;
+  margin:0;
+  font-size:11.5px;
+  letter-spacing:0.06em;
+  white-space:nowrap;
+  color:var(--fg);
+}
+.dropdown-menu a:hover { opacity:0.6; }
+.nav-dropdown:hover .dropdown-menu,
+.nav-dropdown:focus-within .dropdown-menu { display:block; }
+/* Touch: toggle via class */
+.nav-dropdown.open .dropdown-menu { display:block; }
+
 </style>
 </head>
 <body>
@@ -363,16 +392,39 @@ canvas, img, svg, rect {
 
 <header class="site-header" id="siteHeader">
   <div class="site-name" id="sname">ANDRÉ DAMIÃO</div>
-  <canvas id="title-gl-canvas"      style="position:absolute;top:0;left:0;pointer-events:none;z-index:3;"></canvas>
   
 </header>
 
 <nav class="nav">
-  <a href="/bio/"          data-pt="Bio"          data-en="Bio">Bio</a>
-  <a href="/trabalhos/"    data-pt="Trabalhos"     data-en="Works">Trabalhos</a>
-  <a href="/performances/" data-pt="Performances"  data-en="Performances">Performances</a>
-  <a href="/textos/"       data-pt="Texto"         data-en="Text">Texto</a>
-  <a href="/contato/"      data-pt="Contato"       data-en="Contact">Contato</a>
+  <div class="nav-dropdown">
+    <a href="/bio/" data-pt="Bio" data-en="Bio">Bio</a>
+    <div class="dropdown-menu">
+      <a href="/bio/resumo/"   data-pt="Resumo"  data-en="Summary">Resumo</a>
+      <a href="/bio/cv/"       data-pt="CV"      data-en="CV">CV</a>
+      <a href="/bio/imprensa/" data-pt="Imprensa" data-en="Press">Imprensa</a>
+    </div>
+  </div>
+
+  <div class="nav-dropdown">
+    <a href="/obras/" data-pt="Obras" data-en="Works">Obras</a>
+    <div class="dropdown-menu">
+      <a href="/obras/instalacao/"   data-pt="Instalação"  data-en="Installation">Instalação</a>
+      <a href="/obras/albums/"       data-pt="Álbuns"      data-en="Albums">Álbuns</a>
+      <a href="/obras/performance/"  data-pt="Performance" data-en="Performance">Performance</a>
+      <a href="/obras/composicao/"   data-pt="Composição"  data-en="Composition">Composição</a>
+    </div>
+  </div>
+
+  <div class="nav-dropdown">
+    <a href="/pesquisa/" data-pt="Pesquisa" data-en="Research">Pesquisa</a>
+    <div class="dropdown-menu">
+      <a href="/pesquisa/escritos/"  data-pt="Escritos"  data-en="Writings">Escritos</a>
+      <a href="/pesquisa/workshops/" data-pt="Workshops" data-en="Workshops">Workshops</a>
+    </div>
+  </div>
+
+  <a href="/contato/" data-pt="Contato" data-en="Contact">Contato</a>
+
   <span class="nav-spacer"></span>
   <button class="lang-btn active" id="btn-pt" onclick="setLang('pt')">PT</button>
   <span class="lang-sep">/</span>
@@ -864,164 +916,27 @@ function setLang(lang) {
 
 
 
+
+
 <script>
-// ── TITLE WebGL — permanent distortion only ────────────
-(function(){
-  const nameEl = document.getElementById('sname');
-  const header = document.getElementById('siteHeader');
-  const glCnv  = document.getElementById('title-gl-canvas');
-  let W, H, fs;
-
-  function resize(){
-    W  = header.offsetWidth;
-    fs = Math.min(72, Math.max(20, W * 0.07));
-    H  = Math.round(fs * 1.4);
-    glCnv.width  = W; glCnv.height = H;
-    glCnv.style.width = W + 'px'; glCnv.style.height = H + 'px';
-    nameEl.style.visibility = 'hidden';
-  }
-  resize();
-  window.addEventListener('resize', function(){ resize(); buildAll(); });
-
-  const gl = glCnv.getContext('webgl',{alpha:true,premultipliedAlpha:false,antialias:false})
-          || glCnv.getContext('experimental-webgl',{alpha:true,premultipliedAlpha:false});
-  if(!gl) return;
-
-  const VERT = `
-precision mediump float;
-attribute vec2  aPos;
-attribute float aType;
-attribute float aPhase;
-attribute float aScroll;
-attribute float aBright;
-uniform vec2  uRes;
-uniform float uTime;
-varying float vBright;
-float waveVal(float type,float t,float scroll,float freq,float phase,float amp){
-  float x=mod(t*freq+scroll,1.0),a=x*6.2832+phase;
-  if(type<1.0) return amp*sin(a);
-  if(type<2.0) return amp*clamp(sin(a)*4.0,-1.,1.);
-  if(type<3.0){float s=2.0*mod(x,1.0)-1.0;return amp*(s*0.7+sin(a*0.5)*0.3);}
-  if(type<4.0){return amp*(sin(x*31.7+phase)*0.5+sin(x*17.3+phase*1.3)*0.3+sin(x*53.1+phase*0.7)*0.2);}
-  float p=mod(x+1.0,1.0);return amp*exp(-p*12.0)*sin(p*40.0+phase);
-}
-void main(){
-  float scroll=mod(aScroll+uTime*0.002,1.0);
-  float t=aPos.x/uRes.x, freq=0.6+t*3.5;
-  float wy=waveVal(aType,t,scroll,freq,aPhase,1.8);
-  float wx=waveVal(mod(aType+2.0,5.0),1.0-t,scroll*0.7,0.4+(1.0-t)*2.8,aPhase+1.57,0.6);
-  vec2 p=aPos+vec2(wx,-wy);
-  vec2 clip=(p/uRes)*2.0-1.0; clip.y=-clip.y;
-  gl_Position=vec4(clip,0.0,1.0);
-  gl_PointSize=2.0;
-  vBright=aBright;
-}`;
-
-  const FRAG = `
-precision mediump float;
-varying float vBright;
-void main(){
-  vec2 c=gl_PointCoord-0.5; if(dot(c,c)>0.25) discard;
-  gl_FragColor=vec4(vec3(vBright),0.90);
-}`;
-
-  function mkS(t,s){ const sh=gl.createShader(t); gl.shaderSource(sh,s); gl.compileShader(sh);
-    if(!gl.getShaderParameter(sh,gl.COMPILE_STATUS)) console.error(gl.getShaderInfoLog(sh)); return sh; }
-  const prog=gl.createProgram();
-  gl.attachShader(prog,mkS(gl.VERTEX_SHADER,VERT));
-  gl.attachShader(prog,mkS(gl.FRAGMENT_SHADER,FRAG));
-  gl.linkProgram(prog);
-
-  const aPos=gl.getAttribLocation(prog,'aPos'),aType=gl.getAttribLocation(prog,'aType');
-  const aPhase=gl.getAttribLocation(prog,'aPhase'),aScroll=gl.getAttribLocation(prog,'aScroll');
-  const aBright=gl.getAttribLocation(prog,'aBright');
-  const uRes=gl.getUniformLocation(prog,'uRes'),uTime=gl.getUniformLocation(prog,'uTime');
-
-  const STRIDE=6;
-  let grainData=null, nPts=0, buf=null;
-
-  function buildAll(){
-    const tmp=document.createElement('canvas');
-    tmp.width=W; tmp.height=H;
-    const ctx=tmp.getContext('2d',{willReadFrequently:true});
-    ctx.fillStyle='#000'; ctx.fillRect(0,0,W,H);
-    ctx.strokeStyle='#fff'; ctx.lineWidth=1;
-    ctx.font=`${fs}px 'Bebas Neue','Barlow Condensed',Arial Narrow,sans-serif`;
-    ctx.textBaseline='alphabetic';
-    ctx.strokeText('ANDRÉ DAMIÃO',0,fs*0.88);
-    const pix=ctx.getImageData(0,0,W,H).data;
-    const pts=[]; let si=0;
-    for(let j=0;j<H;j++){
-      for(let i=0;i<W;i++){
-        if(pix[(j*W+i)*4]>60){
-          pts.push(i,j,si%5,Math.random()*6.28,Math.random(),0.94); si++;
-        }
-      }
+// Dropdown touch support
+document.querySelectorAll('.nav-dropdown > a').forEach(function(a) {
+  a.addEventListener('click', function(e) {
+    if (window.matchMedia('(hover:none)').matches) {
+      e.preventDefault();
+      var dd = a.closest('.nav-dropdown');
+      var isOpen = dd.classList.contains('open');
+      document.querySelectorAll('.nav-dropdown').forEach(function(d){ d.classList.remove('open'); });
+      if (!isOpen) dd.classList.add('open');
     }
-    nPts=pts.length/STRIDE;
-    grainData=new Float32Array(pts);
-    if(buf) gl.deleteBuffer(buf);
-    buf=gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER,buf);
-    gl.bufferData(gl.ARRAY_BUFFER,grainData,gl.DYNAMIC_DRAW);
+  });
+});
+document.addEventListener('click', function(e) {
+  if (!e.target.closest('.nav-dropdown')) {
+    document.querySelectorAll('.nav-dropdown').forEach(function(d){ d.classList.remove('open'); });
   }
-  buildAll();
-
-  const RX=0.40, RY=0.90;
-  function applyDistortion(mxPx,myPx,strength){
-    const rx=W*RX, ry=H*RY, MAX_NUDGE=3.0*strength;
-    let dMin=nPts, dMax=-1;
-    for(let si=0;si<nPts;si++){
-      const k=si*STRIDE;
-      const dx=grainData[k]-mxPx, dy=grainData[k+1]-myPx;
-      if(Math.abs(dx)>rx||Math.abs(dy)>ry) continue;
-      const inf=(1-Math.abs(dx)/rx)*(1-Math.abs(dy)/ry);
-      if(inf<0.01) continue;
-      const angle=Math.atan2(dy,dx), nudge=inf*MAX_NUDGE;
-      grainData[k]   +=Math.cos(angle+Math.PI)*nudge+Math.sin(angle)*nudge*0.4;
-      grainData[k+1] +=Math.sin(angle+Math.PI)*nudge+Math.cos(angle)*nudge*0.4;
-      if(si<dMin) dMin=si; if(si>dMax) dMax=si;
-    }
-    if(dMax>=dMin){
-      gl.bindBuffer(gl.ARRAY_BUFFER,buf);
-      gl.bufferSubData(gl.ARRAY_BUFFER,dMin*STRIDE*4,grainData.subarray(dMin*STRIDE,(dMax+1)*STRIDE));
-    }
-  }
-
-  let hover=false,mxPx=0,myPx=0,warpAmt=0,warpTarget=0,frame=0;
-  gl.enable(gl.BLEND); gl.blendFunc(gl.SRC_ALPHA,gl.ONE_MINUS_SRC_ALPHA);
-
-  function render(){
-    requestAnimationFrame(render);
-    if(!buf) return;
-    frame++;
-    warpAmt+=(warpTarget-warpAmt)*0.12;
-    if(hover && warpAmt>0.05) applyDistortion(mxPx,myPx,warpAmt);
-    gl.viewport(0,0,W,H);
-    gl.clearColor(0,0,0,0); gl.clear(gl.COLOR_BUFFER_BIT);
-    gl.useProgram(prog);
-    gl.bindBuffer(gl.ARRAY_BUFFER,buf);
-    const ST=STRIDE*4;
-    gl.enableVertexAttribArray(aPos);    gl.vertexAttribPointer(aPos,   2,gl.FLOAT,false,ST,0);
-    gl.enableVertexAttribArray(aType);   gl.vertexAttribPointer(aType,  1,gl.FLOAT,false,ST,8);
-    gl.enableVertexAttribArray(aPhase);  gl.vertexAttribPointer(aPhase, 1,gl.FLOAT,false,ST,12);
-    gl.enableVertexAttribArray(aScroll); gl.vertexAttribPointer(aScroll,1,gl.FLOAT,false,ST,16);
-    gl.enableVertexAttribArray(aBright); gl.vertexAttribPointer(aBright,1,gl.FLOAT,false,ST,20);
-    gl.uniform2f(uRes,W,H); gl.uniform1f(uTime,frame);
-    gl.drawArrays(gl.POINTS,0,nPts);
-  }
-  render();
-
-  header.style.touchAction='none';
-  function onMove(e){
-    const r=header.getBoundingClientRect();
-    mxPx=e.clientX-r.left; myPx=e.clientY-r.top;
-    hover=true; warpTarget=1;
-  }
-  header.addEventListener('pointermove',onMove);
-  header.addEventListener('pointerdown',function(e){header.setPointerCapture(e.pointerId);onMove(e);});
-  header.addEventListener('pointerleave',function(){hover=false;warpTarget=0;});
-  header.addEventListener('pointerup',function(e){if(e.pointerType==='touch'){hover=false;warpTarget=0;}});
-})();
+});
 </script>
+
 </body>
 </html>
